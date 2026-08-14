@@ -2,27 +2,32 @@ SHELL := /bin/bash
 
 RPC_URL     ?= http://127.0.0.1:8545
 API_URL     ?= http://127.0.0.1:8088
+WEB_URL     ?= http://127.0.0.1:5173
 # Anvil prefunded account 0 — the deployer and the registry admin.
 DEPLOYER_KEY ?= 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 
 CONTRACTS := contracts
 BACKEND   := backend
+FRONTEND  := frontend
 RUN       := .run
 DEPLOYMENT := $(CONTRACTS)/deployment.txt
 
 export PATH := $(PATH):$(HOME)/.foundry/bin:$(HOME)/.config/.foundry/bin:$(HOME)/go/bin
 
-.PHONY: demo test build deploy anvil seed backend stop clean tools
+.PHONY: demo test build deploy anvil seed backend frontend stop clean tools
 
 ## demo: everything, from a clean clone, in one command
-demo: stop clean tools build anvil deploy backend seed
+demo: stop clean tools build anvil deploy backend seed frontend
 	@echo
 	@echo "=============================================================="
 	@echo " demo is up"
-	@echo "   anvil     $(RPC_URL)          (log: $(RUN)/anvil.log)"
+	@echo "   frontend  $(WEB_URL)          (log: $(RUN)/frontend.log)"
 	@echo "   backend   $(API_URL)          (log: $(RUN)/backend.log)"
+	@echo "   anvil     $(RPC_URL)          (log: $(RUN)/anvil.log)"
 	@echo "   registry  $$(cat $(DEPLOYMENT))"
 	@echo "   PDFs      ./demo-files/"
+	@echo
+	@echo " open $(WEB_URL) and drop a file from ./demo-files into the verify screen"
 	@echo
 	@echo " try it:"
 	@echo "   file                                  verdict"
@@ -90,17 +95,32 @@ backend:
 seed:
 	./bin/seed -api $(API_URL) -out demo-files
 
-## stop: kill anvil and the backend
+## frontend: start the Vite dev server in the background
+frontend:
+	@mkdir -p $(RUN)
+	@[ -d $(FRONTEND)/node_modules ] || (cd $(FRONTEND) && npm install)
+	@cd $(FRONTEND) && setsid --fork npm run dev < /dev/null > ../$(RUN)/frontend.log 2>&1 & echo $$! > $(RUN)/frontend.pid
+	@echo "waiting for the frontend..."
+	@for i in $$(seq 1 100); do \
+		curl -sf $(WEB_URL) >/dev/null 2>&1 && break; \
+		sleep 0.3; \
+	done
+	@curl -sf $(WEB_URL) >/dev/null || { echo "frontend never came up; see $(RUN)/frontend.log"; exit 1; }
+	@echo "frontend up on $(WEB_URL)"
+
+## stop: kill anvil, the backend and the frontend
 stop:
 	@-[ -f $(RUN)/backend.pid ] && kill $$(cat $(RUN)/backend.pid) 2>/dev/null || true
 	@-[ -f $(RUN)/anvil.pid ] && kill $$(cat $(RUN)/anvil.pid) 2>/dev/null || true
+	@-[ -f $(RUN)/frontend.pid ] && kill $$(cat $(RUN)/frontend.pid) 2>/dev/null || true
 	@-pkill -x server 2>/dev/null || true
 	@-pkill -x anvil 2>/dev/null || true
+	@-pkill -f "$(FRONTEND)/node_modules/.bin/vite" 2>/dev/null || true
 	@-rm -rf $(RUN)
 	@echo "stopped"
 
 ## clean: throw away all demo state (db, deployed address, generated PDFs)
 clean:
 	@rm -f $(BACKEND)/credentials.db $(DEPLOYMENT)
-	@rm -rf demo-files bin $(CONTRACTS)/broadcast $(CONTRACTS)/cache
+	@rm -rf demo-files bin $(CONTRACTS)/broadcast $(CONTRACTS)/cache $(FRONTEND)/dist
 	@echo "cleaned"

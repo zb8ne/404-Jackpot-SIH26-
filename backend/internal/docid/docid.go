@@ -24,10 +24,13 @@ var pattern = regexp.MustCompile(regexp.QuoteMeta(Marker) + `([A-Za-z0-9][A-Za-z
 // Extract scans raw file bytes for the marker and returns the id it carries.
 // ok is false when the file has no marker at all, which means it did not come
 // from this registry.
+//
+// The last marker wins. Stamps are appended, so if a file somehow carries more
+// than one, the newest is the one that describes it.
 func Extract(raw []byte) (id string, ok bool) {
-	m := pattern.FindSubmatch(raw)
-	if m == nil {
+	m := pattern.FindAllSubmatch(raw, -1)
+	if len(m) == 0 {
 		return "", false
 	}
-	return string(bytes.TrimSpace(m[1])), true
+	return string(bytes.TrimSpace(m[len(m)-1][1])), true
 }

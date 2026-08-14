@@ -12,14 +12,20 @@ make demo
 
 One command from a clean clone: boots Anvil, deploys the registry, seeds the three
 department roles, issues three documents each to two citizens, corrects one, revokes
-another, and starts the REST API. Takes about 15 seconds.
+another, and starts the API and the web app.
+
+```
+frontend  http://127.0.0.1:5173
+backend   http://127.0.0.1:8088
+anvil     http://127.0.0.1:8545
+```
 
 ```sh
 make stop     # kill anvil + backend
 make test     # contract tests + the verify state machine
 ```
 
-Needs Go 1.22+ and [Foundry](https://getfoundry.sh) (`curl -L https://foundry.paradigm.xyz | bash && foundryup`).
+Needs Go 1.22+, Node 20+, and [Foundry](https://getfoundry.sh) (`curl -L https://foundry.paradigm.xyz | bash && foundryup`).
 
 ## The demo
 
@@ -54,11 +60,25 @@ Verifying the untouched v1 returns `SUPERSEDED` along with a `supersededBy` poin
 version that replaced it, so a verifier holding an out-of-date copy is sent to the live one
 rather than told it is fake. Scanning v1's QR resolves the same way.
 
-### How a document is identified
+### Issuing stamps the document
 
-Every issued PDF carries its id twice: a **QR code** encoding the docId, and a plain-text
-marker in the content stream reading exactly `CREDREG-DOCID:<docId>`. Verification reads
-the marker — the QR is for scanning on stage, and is never decoded server-side.
+`POST /issue` does not anchor the file it was handed. It stamps the upload with a registry
+page — a QR code encoding the docId, and the marker `CREDREG-DOCID:<docId>` — and only then
+hashes it:
+
+```
+stamp -> sha256(stamped bytes) -> anchor that hash -> store the stamped PDF
+```
+
+The citizen walks away with the stamped copy, so the stamped bytes are the ones the chain
+knows. Stamping is an incremental update: the original bytes are left byte-for-byte intact
+and the registry page is appended, so a department's document is never rewritten. The
+response carries a download link for the stamped file.
+
+Verification reads the marker; the QR is for scanning on stage and is never decoded
+server-side. A PDF whose cross-reference table the stamper cannot follow falls back to
+appending the marker as a trailing comment — still verifiable, just without a page to look
+at, and the response says so.
 
 Carrying an id as well as a hash is what lets the registry tell an altered document from
 one it never issued:
@@ -103,7 +123,25 @@ Same rule, proved at the contract level, in `test_TransportDeptCannotIssueBirthC
 ```
 contracts/   Solidity + Foundry tests + deploy script
 backend/     Go REST API (ethclient + abigen bindings, SQLite for PDFs)
+frontend/    React + TypeScript + Tailwind (Vite)
 ```
+
+### Frontend
+
+Three screens, no router — the QR encodes a bare docId, not a URL.
+
+- **Verify** — drag-drop or pick a PDF. One large colour-coded verdict panel. A tampered
+  document shows the expected and computed hashes stacked, with every differing character
+  highlighted. A superseded one links straight to verifying the version that replaced it.
+- **Issue** — department picker fed by `/departments` (the doc type follows the department,
+  because the contract will reject any other combination), citizen, doc id, file upload. On
+  success it shows the anchored hash and a download link for the stamped PDF.
+- **Citizen** — pick a citizen, see their credentials with status badges. Asha's superseded
+  v1 and current v2 both appear.
+
+## Screenshots
+
+_TODO._
 
 ### Contract
 
@@ -121,7 +159,7 @@ Education departments.
 
 | Method | Path | |
 | --- | --- | --- |
-| POST | `/issue` | multipart: `file`, `dept`, `doc_type`, `doc_id`, `citizen` |
+| POST | `/issue` | multipart: `file`, `dept`, `doc_type`, `doc_id`, `citizen`; stamps, then anchors |
 | POST | `/verify` | multipart: `file` → `VALID` / `SUPERSEDED` / `REVOKED` / `TAMPERED` / `NOT_ISSUED` |
 | GET | `/verify/{docId}` | same shape minus `computedHash` — the QR-scan path |
 | POST | `/revoke` | json: `docHash`, `dept` |
@@ -134,8 +172,9 @@ Education departments.
 
 - Hashes are taken over the raw PDF bytes, so re-saving a file breaks verification. Fine
   here — it is what makes tampering detectable at all.
+- The PDF stamper handles classic cross-reference tables, not compressed xref streams;
+  anything it cannot parse gets the comment fallback.
 - No auth. The department is a picker, and its private key is an Anvil default baked into
   the backend. Never do this anywhere real.
 - Local Anvil only, no testnet, no internet.
 
-Frontend (React + TypeScript + Tailwind) is not built yet.

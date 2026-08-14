@@ -14,6 +14,7 @@ import (
 
 	"credreg/backend/internal/chain"
 	"credreg/backend/internal/docid"
+	"credreg/backend/internal/pdfdoc"
 	"credreg/backend/internal/store"
 )
 
@@ -110,9 +111,18 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Hash of the raw PDF bytes. Re-saving the file changes this — accepted
-	// for the demo, it is what makes tampering detectable at all.
-	sum := sha256.Sum256(pdf)
+	// An upload that already carries a marker has been through here before.
+	// Stamping it again would leave two ids in one file.
+	if existing, marked := docid.Extract(pdf); marked {
+		writeErr(w, http.StatusConflict, fmt.Sprintf("this file has already been issued as %s — upload the unstamped original", existing))
+		return
+	}
+
+	// Stamp first, then hash. The citizen walks away with the stamped file, so
+	// the stamped bytes are the ones the chain has to know about — hashing the
+	// upload as it arrived would anchor a document nobody holds.
+	stamped, marked := pdfdoc.Stamp(pdf, docID)
+	sum := sha256.Sum256(stamped)
 	docHash := "0x" + hex.EncodeToString(sum[:])
 
 	// The contract is the authority on whether this department may issue this
@@ -127,18 +137,20 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 		DocHash: docHash, DocID: docID, DocType: docTypeName, Citizen: citizen,
 		Issuer: dept.Address, Filename: filename, TxHash: txHash,
 	}
-	if err := s.store.Save(doc, pdf); err != nil {
+	if err := s.store.Save(doc, stamped); err != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("anchored on chain (%s) but the off-chain save failed: %v", txHash, err))
 		return
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"docHash": docHash,
-		"txHash":  txHash,
-		"issuer":  dept.Name,
-		"docType": docTypeName,
-		"docId":   docID,
-		"citizen": citizen,
+		"docHash":     docHash,
+		"txHash":      txHash,
+		"issuer":      dept.Name,
+		"docType":     docTypeName,
+		"docId":       docID,
+		"citizen":     citizen,
+		"downloadUrl": downloadURL(docHash),
+		"stamped":     marked,
 	})
 }
 
@@ -381,7 +393,8 @@ func (s *Server) supersede(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sum := sha256.Sum256(pdf)
+	stamped, marked := pdfdoc.Stamp(pdf, docID)
+	sum := sha256.Sum256(stamped)
 	newHash := "0x" + hex.EncodeToString(sum[:])
 
 	txHash, err := s.chain.Supersede(r.Context(), dept, oldHash, sum, docID, dept.DocType)
@@ -394,17 +407,19 @@ func (s *Server) supersede(w http.ResponseWriter, r *http.Request) {
 		DocHash: newHash, DocID: docID, DocType: chain.DocTypeName(dept.DocType),
 		Citizen: citizen, Issuer: dept.Address, Filename: filename, TxHash: txHash,
 	}
-	if err := s.store.Save(doc, pdf); err != nil {
+	if err := s.store.Save(doc, stamped); err != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("anchored on chain (%s) but the off-chain save failed: %v", txHash, err))
 		return
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"docHash": newHash,
-		"oldHash": r.FormValue("old_hash"),
-		"txHash":  txHash,
-		"docId":   docID,
-		"citizen": citizen,
+		"docHash":     newHash,
+		"oldHash":     r.FormValue("old_hash"),
+		"txHash":      txHash,
+		"docId":       docID,
+		"citizen":     citizen,
+		"downloadUrl": downloadURL(newHash),
+		"stamped":     marked,
 	})
 }
 
@@ -451,6 +466,12 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- helpers ----------------------------------------------------------------
+
+// downloadURL is where the stamped PDF can be fetched. Relative, so it works
+// whatever host the frontend is served from.
+func downloadURL(docHash string) string {
+	return "/documents/" + docHash + "/download"
+}
 
 func statusName(s uint8) string {
 	switch s {

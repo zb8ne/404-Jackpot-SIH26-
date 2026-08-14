@@ -16,6 +16,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"credreg/backend/internal/pdfdoc"
 )
 
 type doc struct {
@@ -100,18 +102,19 @@ func main() {
 	var supersedeHash string
 
 	for _, d := range seedDocs {
-		pdf := renderPDF(d.title, d.lines, d.docID)
-
-		path := filepath.Join(*outDir, d.filename)
-		if err := os.WriteFile(path, pdf, 0o644); err != nil {
-			log.Fatal(err)
-		}
-
-		hash, err := issue(*apiURL, d, pdf)
+		// Rendered unmarked on purpose: /issue is what stamps a document with its
+		// QR and marker, so seeded documents travel exactly the same path as ones
+		// a department issues live on stage.
+		hash, err := issue(*apiURL, d, pdfdoc.Render(d.title, d.lines))
 		if err != nil {
 			log.Fatalf("issuing %s: %v", d.docID, err)
 		}
 		log.Printf("issued  %-18s %-22s %s  %s", d.docType, d.docID, d.citizen, hash[:18]+"...")
+
+		// What the citizen holds is the stamped copy the backend produced.
+		if err := download(*apiURL, hash, filepath.Join(*outDir, d.filename)); err != nil {
+			log.Fatalf("downloading %s: %v", d.docID, err)
+		}
 
 		if d.docID == revokedDocID {
 			revokeHash, revokeDept = hash, d.dept
@@ -123,30 +126,34 @@ func main() {
 
 	// The correction: same citizen, same document, spelled right. Superseding
 	// leaves v1 on chain as SUPERSEDED and points its id at this one.
-	corrected := renderPDF("CERTIFICATE OF BIRTH", []string{
+	corrected := pdfdoc.Render("CERTIFICATE OF BIRTH", []string{
 		"Name: Asha Menon", "Date of Birth: 14 March 1999", "Place: Panaji, Goa",
 		"Registration No: BC-2019-004471-R1 (supersedes BC-2019-004471)",
 		"Issued by: Birth Registration Dept",
-	}, correctedDocID)
-	correctedPath := filepath.Join(*outDir, "asha-menon-birth-certificate-v2.pdf")
-	if err := os.WriteFile(correctedPath, corrected, 0o644); err != nil {
-		log.Fatal(err)
-	}
+	})
 	if supersedeHash == "" {
 		log.Fatalf("never captured the hash of %s, cannot supersede it", supersededDocID)
 	}
-	if err := supersede(*apiURL, supersedeHash, correctedDocID, "birth", "Asha Menon", corrected); err != nil {
+	correctedHash, err := supersede(*apiURL, supersedeHash, correctedDocID, "birth", "Asha Menon", corrected)
+	if err != nil {
 		log.Fatalf("superseding %s: %v", supersededDocID, err)
+	}
+	correctedPath := filepath.Join(*outDir, "asha-menon-birth-certificate-v2.pdf")
+	if err := download(*apiURL, correctedHash, correctedPath); err != nil {
+		log.Fatal(err)
 	}
 	log.Printf("superseded %-17s %s -> %s", "birth_certificate", supersededDocID, correctedDocID)
 
 	// A tampered copy of Rahul's degree: the class is upgraded, but the docId
 	// marker is left untouched, so the registry still recognises the document and
 	// can show that these bytes are not the bytes it anchored.
-	tampered := renderPDF("MASTER OF COMMERCE", []string{
+	// Stamped locally with the genuine id, so the marker matches a real document
+	// while the bytes do not — the same file a forger would produce by editing
+	// their copy and saving it again.
+	tampered, _ := pdfdoc.Stamp(pdfdoc.Render("MASTER OF COMMERCE", []string{
 		"Name: Rahul Iyer", "Degree: M.Com", "Class: First Class with Distinction",
 		"Certificate No: DEG-2019-0455", "Issued by: Education Dept",
-	}, "DEG-2019-0455")
+	}), "DEG-2019-0455")
 	tamperedPath := filepath.Join(*outDir, "rahul-iyer-degree-TAMPERED.pdf")
 	if err := os.WriteFile(tamperedPath, tampered, 0o644); err != nil {
 		log.Fatal(err)
@@ -155,10 +162,10 @@ func main() {
 
 	// A forgery that was never issued at all: it carries a marker, but for a
 	// docId the registry has never heard of.
-	forged := renderPDF("DRIVING LICENCE", []string{
+	forged, _ := pdfdoc.Stamp(pdfdoc.Render("DRIVING LICENCE", []string{
 		"Name: Mallory Fernandes", "Licence No: DL-GA-2024-99999", "Class: LMV, MCWG, TRANS",
 		"Valid Until: 1 January 2099", "Issued by: Transport Dept",
-	}, "DL-GA-2024-99999")
+	}), "DL-GA-2024-99999")
 	forgedPath := filepath.Join(*outDir, "never-issued-driving-licence.pdf")
 	if err := os.WriteFile(forgedPath, forged, 0o644); err != nil {
 		log.Fatal(err)
@@ -240,38 +247,63 @@ func issue(base string, d doc, pdf []byte) (string, error) {
 }
 
 // supersede uploads the corrected document and links it to the one it replaces.
-func supersede(base, oldHash, newDocID, dept, citizen string, pdf []byte) error {
+func supersede(base, oldHash, newDocID, dept, citizen string, pdf []byte) (string, error) {
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
 
 	part, err := mw.CreateFormFile("file", newDocID+".pdf")
 	if err != nil {
-		return err
+		return "", err
 	}
 	if _, err := part.Write(pdf); err != nil {
-		return err
+		return "", err
 	}
 	for k, v := range map[string]string{
 		"dept": dept, "doc_id": newDocID, "citizen": citizen, "old_hash": oldHash,
 	} {
 		if err := mw.WriteField(k, v); err != nil {
-			return err
+			return "", err
 		}
 	}
 	if err := mw.Close(); err != nil {
-		return err
+		return "", err
 	}
 
 	resp, err := http.Post(base+"/supersede", mw.FormDataContentType(), &body)
 	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("%s: %s", resp.Status, raw)
+	}
+	var out struct {
+		DocHash string `json:"docHash"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", err
+	}
+	return out.DocHash, nil
+}
+
+// download fetches the stamped copy the backend produced and writes it out.
+func download(base, docHash, path string) error {
+	resp, err := http.Get(base + "/documents/" + docHash + "/download")
+	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("%s: %s", resp.Status, raw)
 	}
-	return nil
+	pdf, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, pdf, 0o644)
 }
 
 func revoke(base, docHash, dept string) error {
