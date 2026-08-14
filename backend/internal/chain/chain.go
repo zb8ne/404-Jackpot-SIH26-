@@ -166,6 +166,16 @@ func (c *Client) Verify(ctx context.Context, docHash [32]byte) (Record, error) {
 	}, nil
 }
 
+// CurrentHashOf resolves a docId to the hash a verifier should expect today.
+// A zero hash means the registry has never issued that id.
+func (c *Client) CurrentHashOf(ctx context.Context, docID string) ([32]byte, bool, error) {
+	h, err := c.registry.CurrentHashOf(&bind.CallOpts{Context: ctx}, docID)
+	if err != nil {
+		return h, false, err
+	}
+	return h, h != [32]byte{}, nil
+}
+
 func (c *Client) Issue(ctx context.Context, dept Department, docHash [32]byte, docID string, docType uint8) (string, error) {
 	opts, err := c.auth(ctx, dept)
 	if err != nil {

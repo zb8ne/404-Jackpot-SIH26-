@@ -4,12 +4,19 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+
+	qrcode "github.com/skip2/go-qrcode"
+
+	"credreg/backend/internal/docid"
 )
 
-// renderPDF writes a minimal, genuinely valid single-page PDF. Enough to open
-// in a viewer and to have stable bytes — which is all the hashing cares about.
-func renderPDF(title string, lines []string) []byte {
+// renderPDF writes a minimal, genuinely valid single-page PDF carrying two
+// copies of its identity: a QR code for the audience to scan, and the
+// CREDREG-DOCID marker the backend actually reads. The content stream is left
+// uncompressed so the marker is findable in the raw bytes.
+func renderPDF(title string, lines []string, docID string) []byte {
 	var content bytes.Buffer
+
 	content.WriteString("BT\n/F1 18 Tf\n72 720 Td\n")
 	fmt.Fprintf(&content, "(%s) Tj\n", escape(title))
 	content.WriteString("/F1 12 Tf\n")
@@ -19,6 +26,14 @@ func renderPDF(title string, lines []string) []byte {
 	content.WriteString("0 -56 Td\n")
 	fmt.Fprintf(&content, "(%s) Tj\n", escape("This document is anchored on the government credential registry."))
 	content.WriteString("ET\n")
+
+	content.WriteString(renderQR(docID, 396, 560, 144))
+
+	// The marker, drawn small under the QR. Both the visible text and the bytes
+	// in this stream read exactly CREDREG-DOCID:<docId>.
+	content.WriteString("BT\n/F1 8 Tf\n396 544 Td\n")
+	fmt.Fprintf(&content, "(%s%s) Tj\nET\n", docid.Marker, escape(docID))
+
 	stream := content.String()
 
 	objects := []string{
@@ -49,6 +64,39 @@ func renderPDF(title string, lines []string) []byte {
 		len(objects)+1, xref)
 
 	return out.Bytes()
+}
+
+// renderQR draws a QR code as vector rectangles, one per dark module. Drawing it
+// rather than embedding an image keeps the PDF to five objects and no filters.
+func renderQR(text string, x, y, size float64) string {
+	q, err := qrcode.New(text, qrcode.Medium)
+	if err != nil {
+		return ""
+	}
+	bitmap := q.Bitmap()
+	n := len(bitmap)
+	if n == 0 {
+		return ""
+	}
+	module := size / float64(n)
+
+	var b strings.Builder
+	b.WriteString("q\n1 1 1 rg\n")
+	fmt.Fprintf(&b, "%.2f %.2f %.2f %.2f re f\n", x, y, size, size)
+	b.WriteString("0 0 0 rg\n")
+	for row := range bitmap {
+		for col := range bitmap[row] {
+			if !bitmap[row][col] {
+				continue
+			}
+			// PDF's origin is bottom-left; the bitmap's is top-left.
+			mx := x + float64(col)*module
+			my := y + size - float64(row+1)*module
+			fmt.Fprintf(&b, "%.2f %.2f %.2f %.2f re f\n", mx, my, module, module)
+		}
+	}
+	b.WriteString("Q\n")
+	return b.String()
 }
 
 // escape protects the delimiters that would otherwise break a PDF string.

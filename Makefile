@@ -25,9 +25,15 @@ demo: stop clean tools build anvil deploy backend seed
 	@echo "   PDFs      ./demo-files/"
 	@echo
 	@echo " try it:"
+	@echo "   file                                       verdict"
+	@echo "   asha-menon-degree.pdf                      VALID"
+	@echo "   rahul-iyer-driving-licence.pdf             REVOKED"
+	@echo "   asha-menon-birth-certificate-TAMPERED.pdf  TAMPERED"
+	@echo "   never-issued-driving-licence.pdf           NOT_ISSUED"
+	@echo
+	@echo "   curl -s -F file=@demo-files/asha-menon-birth-certificate-TAMPERED.pdf $(API_URL)/verify | jq"
+	@echo "   curl -s $(API_URL)/verify/BC-2019-004471 | jq       # what a QR scan hits"
 	@echo "   curl -s $(API_URL)/credentials/Asha%20Menon | jq"
-	@echo "   curl -s -F file=@demo-files/asha-menon-degree.pdf $(API_URL)/verify | jq"
-	@echo "   curl -s -F file=@demo-files/rahul-iyer-driving-licence-TAMPERED.pdf $(API_URL)/verify | jq"
 	@echo
 	@echo " stop with: make stop"
 	@echo "=============================================================="
@@ -77,7 +83,7 @@ backend:
 	@curl -sf $(API_URL)/health >/dev/null || { echo "backend never came up; see $(RUN)/backend.log"; exit 1; }
 	@echo "backend up on $(API_URL)"
 
-## seed: two citizens, three documents each, one revoked, one tampered copy
+## seed: two citizens, three documents each, plus revoked/tampered/never-issued copies
 seed:
 	./bin/seed -api $(API_URL) -out demo-files
 

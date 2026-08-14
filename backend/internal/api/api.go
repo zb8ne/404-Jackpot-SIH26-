@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"credreg/backend/internal/chain"
+	"credreg/backend/internal/docid"
 	"credreg/backend/internal/store"
 )
 
@@ -31,6 +33,7 @@ func New(c *chain.Client, s *store.Store) http.Handler {
 	mux.HandleFunc("GET /citizens", srv.citizens)
 	mux.HandleFunc("POST /issue", srv.issue)
 	mux.HandleFunc("POST /verify", srv.verify)
+	mux.HandleFunc("GET /verify/{docId}", srv.verifyByID)
 	mux.HandleFunc("POST /revoke", srv.revoke)
 	mux.HandleFunc("GET /credentials/{citizen}", srv.credentials)
 	mux.HandleFunc("GET /documents/{hash}/download", srv.download)
@@ -130,7 +133,14 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// verify hashes an uploaded PDF and asks the chain what it knows about it.
+// zeroHash is what an unknown docId resolves to, and what we report as the
+// expected hash when there is nothing to expect.
+const zeroHash = "0x" + "0000000000000000000000000000000000000000000000000000000000000000"
+
+// verify identifies an uploaded PDF by its embedded marker, then compares the
+// hash the registry expects for that id against the hash of the bytes we were
+// handed. Identifying by id first is what separates a document that was altered
+// from one that was never issued.
 func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 	pdf, filename, err := readUpload(r)
 	if err != nil {
@@ -139,27 +149,87 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sum := sha256.Sum256(pdf)
-	docHash := "0x" + hex.EncodeToString(sum[:])
+	computed := "0x" + hex.EncodeToString(sum[:])
 
-	rec, err := s.chain.Verify(r.Context(), sum)
-	if err != nil {
+	resp := map[string]any{
+		"filename":     filename,
+		"computedHash": computed,
+		"expectedHash": zeroHash,
+		"docId":        "",
+	}
+
+	id, ok := docid.Extract(pdf)
+	if !ok {
+		resp["status"] = "NOT_ISSUED"
+		resp["message"] = "this file carries no registry marker, so it was never issued by any department"
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	resp["docId"] = id
+
+	if err := s.resolve(r.Context(), id, computed, resp); err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// verifyByID answers the same question from an id alone — what a QR scan hits
+// when the verifier is holding a phone rather than the file. Without bytes to
+// hash there is no computedHash, so the verdict can only be what the registry
+// currently says about the document.
+func (s *Server) verifyByID(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("docId")
 
 	resp := map[string]any{
-		"docHash":  docHash,
-		"filename": filename,
+		"docId":        id,
+		"expectedHash": zeroHash,
+	}
+	if err := s.resolve(r.Context(), id, "", resp); err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// resolve fills in the verdict for a docId. When computed is empty the caller had
+// no file, so the hash comparison is skipped.
+func (s *Server) resolve(ctx context.Context, id, computed string, resp map[string]any) error {
+	expectedRaw, known, err := s.chain.CurrentHashOf(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !known {
+		resp["status"] = "NOT_ISSUED"
+		resp["message"] = fmt.Sprintf("no document with id %s has ever been issued", id)
+		return nil
 	}
 
-	if !rec.Found {
-		// The chain has never seen this hash. Either the file was altered after
-		// issue, or it was never issued at all — we cannot tell the two apart
-		// from the bytes alone, so say so.
-		resp["status"] = "TAMPERED_OR_NOT_FOUND"
-		resp["message"] = "no on-chain record for this file's hash — it was either never issued or has been modified since"
-		writeJSON(w, http.StatusOK, resp)
-		return
+	expected := "0x" + hex.EncodeToString(expectedRaw[:])
+	resp["expectedHash"] = expected
+
+	rec, err := s.chain.Verify(ctx, expectedRaw)
+	if err != nil {
+		return err
+	}
+
+	resp["docType"] = chain.DocTypeName(rec.DocType)
+	resp["issuer"] = rec.Issuer
+	resp["timestamp"] = rec.Timestamp
+	resp["prevHash"] = rec.PrevHash
+
+	// The citizen's name lives off chain; it is a convenience, not proof.
+	if doc, ok, _ := s.store.ByHash(expected); ok {
+		resp["citizen"] = doc.Citizen
+		resp["originalFilename"] = doc.Filename
+	}
+
+	if computed != "" && !strings.EqualFold(computed, expected) {
+		// The id is genuine and on file, but these bytes are not the bytes we
+		// anchored. That is tampering, and we can prove it by showing both hashes.
+		resp["status"] = "TAMPERED"
+		resp["message"] = fmt.Sprintf("document %s exists, but this file does not match the hash on record — it has been modified since it was issued", id)
+		return nil
 	}
 
 	switch rec.Status {
@@ -172,21 +242,11 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 	case chain.StatusRevoked:
 		resp["status"] = "REVOKED"
 		resp["message"] = "authentic, but revoked by the issuing department"
+	default:
+		resp["status"] = "UNKNOWN"
+		resp["message"] = "the registry returned a status this build does not recognise"
 	}
-
-	resp["docId"] = rec.DocID
-	resp["docType"] = chain.DocTypeName(rec.DocType)
-	resp["issuer"] = rec.Issuer
-	resp["issuedAt"] = rec.Timestamp
-	resp["prevHash"] = rec.PrevHash
-
-	// The filename and citizen are off-chain conveniences, not proof.
-	if doc, ok, _ := s.store.ByHash(docHash); ok {
-		resp["citizen"] = doc.Citizen
-		resp["originalFilename"] = doc.Filename
-	}
-
-	writeJSON(w, http.StatusOK, resp)
+	return nil
 }
 
 func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {

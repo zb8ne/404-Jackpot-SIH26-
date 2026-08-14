@@ -33,6 +33,14 @@ contract CredentialRegistry {
     /// @dev department address => the single doc type it is allowed to issue.
     mapping(address => uint8) public issuerRole;
 
+    /// @notice docId => the hash a verifier should expect for that document today.
+    /// @dev This is what makes "tampered" distinguishable from "never issued": a
+    ///      known docId whose hash does not match means the bytes changed, while an
+    ///      unknown docId means we never issued it at all. Superseding repoints this
+    ///      at the replacement; revoking deliberately leaves it alone, so a revoked
+    ///      document stays findable.
+    mapping(string => bytes32) public currentHashOf;
+
     address public immutable admin;
 
     event RoleGranted(address indexed dept, uint8 docType);
@@ -47,6 +55,7 @@ contract CredentialRegistry {
     error NotIssuer(address caller);
     error NotValid(bytes32 docHash);
     error InvalidDocType(uint8 docType);
+    error DocIdInUse(string docId);
 
     constructor() {
         admin = msg.sender;
@@ -71,6 +80,9 @@ contract CredentialRegistry {
 
     function issue(bytes32 docHash, string calldata docId, uint8 docType) external onlyIssuerOf(docType) {
         if (records[docHash].issuer != address(0)) revert AlreadyIssued(docHash);
+        // A docId is an identity, not a label: reusing one would silently repoint
+        // the index. Replacing a document is what supersede() is for.
+        if (currentHashOf[docId] != bytes32(0)) revert DocIdInUse(docId);
         records[docHash] = Credential({
             docId: docId,
             docType: docType,
@@ -79,6 +91,7 @@ contract CredentialRegistry {
             status: Status.VALID,
             prevHash: bytes32(0)
         });
+        currentHashOf[docId] = docHash;
         emit Issued(docHash, docId, docType, msg.sender);
     }
 
@@ -103,6 +116,11 @@ contract CredentialRegistry {
             status: Status.VALID,
             prevHash: oldHash
         });
+        // Repoint both ids at the replacement. The old id keeps resolving so that a
+        // QR printed on the superseded copy still leads a verifier to the current
+        // document rather than to a dead end.
+        currentHashOf[old.docId] = newHash;
+        currentHashOf[docId] = newHash;
         emit Superseded(oldHash, newHash);
         emit Issued(newHash, docId, docType, msg.sender);
     }
@@ -111,6 +129,9 @@ contract CredentialRegistry {
         Credential storage c = records[docHash];
         if (c.issuer == address(0)) revert UnknownCredential(docHash);
         if (c.issuer != msg.sender) revert NotIssuer(msg.sender);
+        // Note: currentHashOf is deliberately left alone. A revoked document must
+        // stay findable, so that verifying it reports REVOKED rather than
+        // pretending it was never issued.
         c.status = Status.REVOKED;
         emit Revoked(docHash);
     }

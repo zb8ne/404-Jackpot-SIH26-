@@ -92,7 +92,7 @@ func main() {
 	var revokeHash, revokeDept string
 
 	for _, d := range seedDocs {
-		pdf := renderPDF(d.title, d.lines)
+		pdf := renderPDF(d.title, d.lines, d.docID)
 
 		path := filepath.Join(*outDir, d.filename)
 		if err := os.WriteFile(path, pdf, 0o644); err != nil {
@@ -110,17 +110,30 @@ func main() {
 		}
 	}
 
-	// A tampered copy: same document, one field edited. Its bytes hash to
-	// something the chain has never seen.
-	tampered := renderPDF("DRIVING LICENCE", []string{
-		"Name: Rahul Iyer", "Licence No: DL-GA-2016-33017", "Class: LMV, MCWG, TRANS",
-		"Valid Until: 12 January 2046", "Issued by: Transport Dept",
-	})
-	tamperedPath := filepath.Join(*outDir, "rahul-iyer-driving-licence-TAMPERED.pdf")
+	// A tampered copy of Asha's birth certificate: the body is edited but the
+	// docId marker is left untouched, so the registry still recognises the
+	// document and can show that these bytes are not the bytes it anchored.
+	tampered := renderPDF("CERTIFICATE OF BIRTH", []string{
+		"Name: Asha Menon", "Date of Birth: 14 March 1996", "Place: Panaji, Goa",
+		"Registration No: BC-2019-004471", "Issued by: Birth Registration Dept",
+	}, "BC-2019-004471")
+	tamperedPath := filepath.Join(*outDir, "asha-menon-birth-certificate-TAMPERED.pdf")
 	if err := os.WriteFile(tamperedPath, tampered, 0o644); err != nil {
 		log.Fatal(err)
 	}
 	log.Printf("wrote   tampered copy      %s", tamperedPath)
+
+	// A forgery that was never issued at all: it carries a marker, but for a
+	// docId the registry has never heard of.
+	forged := renderPDF("DRIVING LICENCE", []string{
+		"Name: Mallory Fernandes", "Licence No: DL-GA-2024-99999", "Class: LMV, MCWG, TRANS",
+		"Valid Until: 1 January 2099", "Issued by: Transport Dept",
+	}, "DL-GA-2024-99999")
+	forgedPath := filepath.Join(*outDir, "never-issued-driving-licence.pdf")
+	if err := os.WriteFile(forgedPath, forged, 0o644); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("wrote   never-issued copy  %s", forgedPath)
 
 	// And revoke one genuine licence.
 	if revokeHash != "" {
@@ -132,9 +145,10 @@ func main() {
 
 	fmt.Println()
 	fmt.Println("demo files in ./" + *outDir + ":")
-	fmt.Println("  *.pdf                     -> verify as VALID")
-	fmt.Println("  rahul-iyer-driving-licence.pdf -> verify as REVOKED")
-	fmt.Println("  *-TAMPERED.pdf            -> verify as TAMPERED_OR_NOT_FOUND")
+	fmt.Println("  asha-menon-degree.pdf                     -> VALID")
+	fmt.Println("  rahul-iyer-driving-licence.pdf            -> REVOKED")
+	fmt.Println("  asha-menon-birth-certificate-TAMPERED.pdf -> TAMPERED")
+	fmt.Println("  never-issued-driving-licence.pdf          -> NOT_ISSUED")
 }
 
 func waitForAPI(base string, limit time.Duration) error {

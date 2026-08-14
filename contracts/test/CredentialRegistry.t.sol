@@ -152,6 +152,55 @@ contract CredentialRegistryTest is Test {
         vm.stopPrank();
     }
 
+    // --- the docId index ------------------------------------------------------
+
+    /// The distinction the whole verify screen rests on. Both files fail the hash
+    /// check, but a known docId means the bytes were altered, while an unknown one
+    /// means we never issued the document at all.
+    function test_TamperedAndNeverIssuedResolveDifferently() public {
+        vm.prank(birthDept);
+        reg.issue(HASH_A, "BC-2024-0001", BIRTH);
+
+        // Tampered: the id is on file, the hash is not the one we recorded.
+        bytes32 expected = reg.currentHashOf("BC-2024-0001");
+        assertEq(expected, HASH_A, "a known id resolves to its hash");
+        assertTrue(expected != keccak256("birth-cert-a-with-an-edited-date.pdf"), "tampered bytes differ");
+
+        // Never issued: the id resolves to nothing at all.
+        assertEq(reg.currentHashOf("BC-9999-999999"), bytes32(0), "an unknown id resolves to zero");
+    }
+
+    function test_CurrentHashOfFollowsSupersedeChain() public {
+        vm.startPrank(birthDept);
+        reg.issue(HASH_A, "BC-2024-0001", BIRTH);
+        assertEq(reg.currentHashOf("BC-2024-0001"), HASH_A);
+
+        reg.supersede(HASH_A, HASH_B, "BC-2024-0001-R1", BIRTH);
+        vm.stopPrank();
+
+        // Both the original id and the replacement's id point at the new hash, so a
+        // QR printed on the old copy still leads to the current document.
+        assertEq(reg.currentHashOf("BC-2024-0001"), HASH_B, "old id repoints to the replacement");
+        assertEq(reg.currentHashOf("BC-2024-0001-R1"), HASH_B, "new id resolves too");
+    }
+
+    function test_RevokeLeavesTheDocumentFindable() public {
+        vm.startPrank(birthDept);
+        reg.issue(HASH_A, "BC-2024-0001", BIRTH);
+        reg.revoke(HASH_A, BIRTH);
+        vm.stopPrank();
+
+        assertEq(reg.currentHashOf("BC-2024-0001"), HASH_A, "a revoked document is still findable");
+    }
+
+    function test_CannotReuseADocId() public {
+        vm.startPrank(birthDept);
+        reg.issue(HASH_A, "BC-2024-0001", BIRTH);
+        vm.expectRevert(abi.encodeWithSelector(CredentialRegistry.DocIdInUse.selector, "BC-2024-0001"));
+        reg.issue(HASH_B, "BC-2024-0001", BIRTH);
+        vm.stopPrank();
+    }
+
     function test_OnlyAdminGrantsRoles() public {
         vm.prank(randomer);
         vm.expectRevert(CredentialRegistry.NotAdmin.selector);
