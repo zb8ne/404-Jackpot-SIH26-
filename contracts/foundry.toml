@@ -1,0 +1,9 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc = "0.8.35"
+
+# Deploy.s.sol writes the deployed address to contracts/deployment.txt for the
+# backend and the Makefile to pick up.
+fs_permissions = [{ access = "write", path = "./deployment.txt" }]

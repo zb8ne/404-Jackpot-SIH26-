@@ -1,0 +1,11 @@
+# build output
+bin/
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+
+# runtime state
+.run/
+demo-files/
+contracts/deployment.txt
+backend/*.db
