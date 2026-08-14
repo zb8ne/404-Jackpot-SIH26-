@@ -30,11 +30,13 @@ type doc struct {
 
 var seedDocs = []doc{
 	{
+		// Issued with the name misspelled. The Birth Dept corrects it further down
+		// by superseding this record rather than editing it.
 		citizen: "Asha Menon", dept: "birth", docType: "birth_certificate", docID: "BC-2019-004471",
 		title: "CERTIFICATE OF BIRTH",
-		lines: []string{"Name: Asha Menon", "Date of Birth: 14 March 1999", "Place: Panaji, Goa",
+		lines: []string{"Name: Aasha Menonn", "Date of Birth: 14 March 1999", "Place: Panaji, Goa",
 			"Registration No: BC-2019-004471", "Issued by: Birth Registration Dept"},
-		filename: "asha-menon-birth-certificate.pdf",
+		filename: "asha-menon-birth-certificate-v1.pdf",
 	},
 	{
 		citizen: "Asha Menon", dept: "transport", docType: "driving_licence", docID: "DL-GA-2021-88120",
@@ -77,6 +79,11 @@ var seedDocs = []doc{
 // whose bytes are perfectly genuine.
 const revokedDocID = "DL-GA-2016-33017"
 
+// The birth certificate that gets corrected on stage. v1 keeps its place in the
+// record as SUPERSEDED — a correction adds history instead of erasing it.
+const supersededDocID = "BC-2019-004471"
+const correctedDocID = "BC-2019-004471-R1"
+
 func main() {
 	apiURL := flag.String("api", "http://127.0.0.1:8088", "backend base URL")
 	outDir := flag.String("out", "demo-files", "where to write the seeded PDFs")
@@ -90,6 +97,7 @@ func main() {
 	}
 
 	var revokeHash, revokeDept string
+	var supersedeHash string
 
 	for _, d := range seedDocs {
 		pdf := renderPDF(d.title, d.lines, d.docID)
@@ -108,16 +116,38 @@ func main() {
 		if d.docID == revokedDocID {
 			revokeHash, revokeDept = hash, d.dept
 		}
+		if d.docID == supersededDocID {
+			supersedeHash = hash
+		}
 	}
 
-	// A tampered copy of Asha's birth certificate: the body is edited but the
-	// docId marker is left untouched, so the registry still recognises the
-	// document and can show that these bytes are not the bytes it anchored.
-	tampered := renderPDF("CERTIFICATE OF BIRTH", []string{
-		"Name: Asha Menon", "Date of Birth: 14 March 1996", "Place: Panaji, Goa",
-		"Registration No: BC-2019-004471", "Issued by: Birth Registration Dept",
-	}, "BC-2019-004471")
-	tamperedPath := filepath.Join(*outDir, "asha-menon-birth-certificate-TAMPERED.pdf")
+	// The correction: same citizen, same document, spelled right. Superseding
+	// leaves v1 on chain as SUPERSEDED and points its id at this one.
+	corrected := renderPDF("CERTIFICATE OF BIRTH", []string{
+		"Name: Asha Menon", "Date of Birth: 14 March 1999", "Place: Panaji, Goa",
+		"Registration No: BC-2019-004471-R1 (supersedes BC-2019-004471)",
+		"Issued by: Birth Registration Dept",
+	}, correctedDocID)
+	correctedPath := filepath.Join(*outDir, "asha-menon-birth-certificate-v2.pdf")
+	if err := os.WriteFile(correctedPath, corrected, 0o644); err != nil {
+		log.Fatal(err)
+	}
+	if supersedeHash == "" {
+		log.Fatalf("never captured the hash of %s, cannot supersede it", supersededDocID)
+	}
+	if err := supersede(*apiURL, supersedeHash, correctedDocID, "birth", "Asha Menon", corrected); err != nil {
+		log.Fatalf("superseding %s: %v", supersededDocID, err)
+	}
+	log.Printf("superseded %-17s %s -> %s", "birth_certificate", supersededDocID, correctedDocID)
+
+	// A tampered copy of Rahul's degree: the class is upgraded, but the docId
+	// marker is left untouched, so the registry still recognises the document and
+	// can show that these bytes are not the bytes it anchored.
+	tampered := renderPDF("MASTER OF COMMERCE", []string{
+		"Name: Rahul Iyer", "Degree: M.Com", "Class: First Class with Distinction",
+		"Certificate No: DEG-2019-0455", "Issued by: Education Dept",
+	}, "DEG-2019-0455")
+	tamperedPath := filepath.Join(*outDir, "rahul-iyer-degree-TAMPERED.pdf")
 	if err := os.WriteFile(tamperedPath, tampered, 0o644); err != nil {
 		log.Fatal(err)
 	}
@@ -145,10 +175,11 @@ func main() {
 
 	fmt.Println()
 	fmt.Println("demo files in ./" + *outDir + ":")
-	fmt.Println("  asha-menon-degree.pdf                     -> VALID")
-	fmt.Println("  rahul-iyer-driving-licence.pdf            -> REVOKED")
-	fmt.Println("  asha-menon-birth-certificate-TAMPERED.pdf -> TAMPERED")
-	fmt.Println("  never-issued-driving-licence.pdf          -> NOT_ISSUED")
+	fmt.Println("  asha-menon-birth-certificate-v2.pdf  -> VALID")
+	fmt.Println("  asha-menon-birth-certificate-v1.pdf  -> SUPERSEDED (points at v2)")
+	fmt.Println("  rahul-iyer-driving-licence.pdf       -> REVOKED")
+	fmt.Println("  rahul-iyer-degree-TAMPERED.pdf       -> TAMPERED")
+	fmt.Println("  never-issued-driving-licence.pdf     -> NOT_ISSUED")
 }
 
 func waitForAPI(base string, limit time.Duration) error {
@@ -206,6 +237,41 @@ func issue(base string, d doc, pdf []byte) (string, error) {
 		return "", err
 	}
 	return out.DocHash, nil
+}
+
+// supersede uploads the corrected document and links it to the one it replaces.
+func supersede(base, oldHash, newDocID, dept, citizen string, pdf []byte) error {
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+
+	part, err := mw.CreateFormFile("file", newDocID+".pdf")
+	if err != nil {
+		return err
+	}
+	if _, err := part.Write(pdf); err != nil {
+		return err
+	}
+	for k, v := range map[string]string{
+		"dept": dept, "doc_id": newDocID, "citizen": citizen, "old_hash": oldHash,
+	} {
+		if err := mw.WriteField(k, v); err != nil {
+			return err
+		}
+	}
+	if err := mw.Close(); err != nil {
+		return err
+	}
+
+	resp, err := http.Post(base+"/supersede", mw.FormDataContentType(), &body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		raw, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("%s: %s", resp.Status, raw)
+	}
+	return nil
 }
 
 func revoke(base, docHash, dept string) error {

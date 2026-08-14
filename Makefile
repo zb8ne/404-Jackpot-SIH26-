@@ -25,15 +25,17 @@ demo: stop clean tools build anvil deploy backend seed
 	@echo "   PDFs      ./demo-files/"
 	@echo
 	@echo " try it:"
-	@echo "   file                                       verdict"
-	@echo "   asha-menon-degree.pdf                      VALID"
-	@echo "   rahul-iyer-driving-licence.pdf             REVOKED"
-	@echo "   asha-menon-birth-certificate-TAMPERED.pdf  TAMPERED"
-	@echo "   never-issued-driving-licence.pdf           NOT_ISSUED"
+	@echo "   file                                  verdict"
+	@echo "   asha-menon-birth-certificate-v2.pdf   VALID"
+	@echo "   asha-menon-birth-certificate-v1.pdf   SUPERSEDED (points at v2)"
+	@echo "   rahul-iyer-driving-licence.pdf        REVOKED"
+	@echo "   rahul-iyer-degree-TAMPERED.pdf        TAMPERED"
+	@echo "   never-issued-driving-licence.pdf      NOT_ISSUED"
 	@echo
-	@echo "   curl -s -F file=@demo-files/asha-menon-birth-certificate-TAMPERED.pdf $(API_URL)/verify | jq"
+	@echo "   curl -s -F file=@demo-files/asha-menon-birth-certificate-v1.pdf $(API_URL)/verify | jq"
+	@echo "   curl -s -F file=@demo-files/rahul-iyer-degree-TAMPERED.pdf $(API_URL)/verify | jq"
 	@echo "   curl -s $(API_URL)/verify/BC-2019-004471 | jq       # what a QR scan hits"
-	@echo "   curl -s $(API_URL)/credentials/Asha%20Menon | jq"
+	@echo "   curl -s $(API_URL)/credentials/Asha%20Menon | jq    # v1 and v2 side by side"
 	@echo
 	@echo " stop with: make stop"
 	@echo "=============================================================="
@@ -44,9 +46,10 @@ tools:
 		echo "forge not found. install foundry:"; \
 		echo "  curl -L https://foundry.paradigm.xyz | bash && foundryup"; exit 1; }
 
-## test: the contract test suite
+## test: the contract suite plus the backend's verify state machine
 test:
 	cd $(CONTRACTS) && forge test -vv
+	cd $(BACKEND) && go test ./...
 
 ## build: compile contracts and the Go binaries into ./bin
 build: test
@@ -83,7 +86,7 @@ backend:
 	@curl -sf $(API_URL)/health >/dev/null || { echo "backend never came up; see $(RUN)/backend.log"; exit 1; }
 	@echo "backend up on $(API_URL)"
 
-## seed: two citizens, three documents each, plus revoked/tampered/never-issued copies
+## seed: two citizens, three documents each, plus superseded/revoked/tampered/never-issued copies
 seed:
 	./bin/seed -api $(API_URL) -out demo-files
 
