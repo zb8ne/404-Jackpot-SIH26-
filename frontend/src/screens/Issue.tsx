@@ -32,6 +32,27 @@ export function Issue() {
   // it, so the form simply follows the picker rather than offering a free choice.
   const selected = departments.find((d) => d.slug === dept)
 
+
+
+// adding generate random docid function
+
+
+
+function generateDocId() {
+  if (!selected) return
+
+  const prefixes: Record<string, string> = {
+    birth_certificate: 'BC',
+    driving_licence: 'DL',
+    degree_certificate: 'DEG',
+  }
+
+  const prefix = prefixes[selected.docTypeName] ?? 'DOC'
+  const random = crypto.randomUUID().replaceAll('-', '').slice(0, 8).toUpperCase()
+
+  setDocId(`${prefix}-${new Date().getFullYear()}-${random}`)
+}
+
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!file || !selected) return
@@ -65,7 +86,11 @@ export function Issue() {
               <button
                 type="button"
                 key={d.slug}
-                onClick={() => setDept(d.slug)}
+                // if the dept is changed the placeholder docid is cleared so that the user can generate a new one for the new dept
+                onClick={() => {
+                  setDept(d.slug)
+                  setDocId('')
+                }}
                 className={`rounded-xl border p-4 text-left transition ${
                   d.slug === dept
                     ? 'border-sky-500 bg-sky-500/10'
@@ -87,9 +112,27 @@ export function Issue() {
           <Input value={citizen} onChange={setCitizen} placeholder="Asha Menon" required />
         </div>
 
+{/* changed the button and added a genrate docid button */}
         <div>
           <Label>Document id</Label>
-          <Input value={docId} onChange={setDocId} placeholder="BC-2026-000001" required mono />
+
+              <div className="flex gap-3">
+                <Input
+                  value={docId}
+                  onChange={setDocId}
+                  placeholder="BC-2026-000001"
+                  required
+                  mono
+                />
+
+                <button
+                  type="button"
+                  onClick={generateDocId}
+                  className="shrink-0 rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 font-semibold text-slate-200 transition hover:bg-slate-700"
+                >
+                  Generate
+                </button>
+              </div>
         </div>
 
         <div>
