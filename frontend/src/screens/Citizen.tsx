@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { API, docTypeLabel, getCitizens, getCredentials, type Credential } from '../api'
+import { docTypeLabel, downloadDocument, getCitizens, getCredentials, type Credential } from '../api'
 import { Hash } from '../components/Hash'
 import { verdictOf } from '../verdicts'
 
@@ -63,12 +63,12 @@ export function Citizen() {
                   </div>
                   <p className="mt-1 font-mono text-slate-400">{doc.docId}</p>
                 </div>
-                <a
-                  href={`${API}/documents/${doc.docHash}/download`}
+                <button
+                  onClick={() => void downloadDocument(`/documents/${doc.docHash}/download`, doc.filename).catch((e) => setError(String(e)))}
                   className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500 hover:text-slate-100"
                 >
                   Download ↓
-                </a>
+                </button>
               </div>
 
               <dl className="mt-5 grid gap-x-8 gap-y-3 text-sm sm:grid-cols-3">

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import {
-  API,
+  downloadDocument,
   docTypeLabel,
   getDepartments,
+  getMe,
   issueDocument,
   type Department,
   type IssueResult,
@@ -20,8 +21,9 @@ export function Issue() {
   const [result, setResult] = useState<IssueResult | null>(null)
 
   useEffect(() => {
-    getDepartments()
-      .then((d) => {
+    Promise.all([getDepartments(), getMe()])
+      .then(([allDepartments, me]) => {
+        const d = allDepartments.filter((department) => department.slug === me.department?.id)
         setDepartments(d)
         setDept(d[0]?.slug ?? '')
       })
@@ -180,12 +182,13 @@ function generateDocId() {
               <Row label="Anchored hash" value={<Hash value={result.docHash} />} />
               <Row label="Transaction" value={<Hash value={result.txHash} />} />
             </dl>
-            <a
-              href={`${API}${result.downloadUrl}`}
+            <button
+              type="button"
+              onClick={() => void downloadDocument(result.downloadUrl, `${result.docId}.pdf`).catch((e) => setError(String(e)))}
               className="mt-6 inline-block rounded-lg bg-emerald-500/20 px-5 py-3 font-semibold text-emerald-100 transition hover:bg-emerald-500/30"
             >
               Download the stamped PDF ↓
-            </a>
+            </button>
             {!result.stamped && (
               <p className="mt-4 text-sm text-amber-300">
                 This PDF's structure could not be extended, so the marker was appended as a comment

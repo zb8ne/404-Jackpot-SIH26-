@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 
 	"credreg/backend/internal/api"
+	"credreg/backend/internal/auth"
 	"credreg/backend/internal/chain"
 	"credreg/backend/internal/store"
 )
@@ -52,18 +54,48 @@ func main() {
 		log.Fatalf("opening %s: %v", *dbPath, err)
 	}
 	defer st.Close()
+	if err := validateDepartments(st); err != nil {
+		log.Fatalf("department configuration: %v", err)
+	}
 
 	log.Printf("registry  %s", addrHex)
 	log.Printf("rpc       %s", *rpcURL)
 	log.Printf("db        %s", *dbPath)
 	log.Printf("listening on %s", *addr)
 
+	supabaseURL := os.Getenv("SUPABASE_URL")
+	if supabaseURL == "" {
+		log.Fatal("SUPABASE_URL is required")
+	}
+
+	verifier := auth.NewVerifier(supabaseURL)
+
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           api.New(c, st),
+		Handler:           api.New(c, st, verifier),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Fatal(srv.ListenAndServe())
+}
+
+func validateDepartments(st *store.Store) error {
+	departments, err := st.Departments()
+	if err != nil {
+		return err
+	}
+	for _, d := range departments {
+		if !d.Active {
+			continue
+		}
+		chainDepartment, ok := chain.DepartmentBySlug(d.ID)
+		if !ok {
+			return fmt.Errorf("active department %q has no chain signer", d.ID)
+		}
+		if chainDepartment.DocType != d.DocType {
+			return fmt.Errorf("department %q has document type %d in SQLite and %d in chain configuration", d.ID, d.DocType, chainDepartment.DocType)
+		}
+	}
+	return nil
 }
 
 func envOr(key, fallback string) string {
