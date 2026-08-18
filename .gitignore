@@ -12,3 +12,6 @@ backend/*.db
 
 # secrets
 .env
+
+# cloned separately for the /demo page; it is its own repository
+playground/
