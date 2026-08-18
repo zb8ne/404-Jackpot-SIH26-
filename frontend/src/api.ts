@@ -69,6 +69,88 @@ export type IssueResult = {
   stamped: boolean
 }
 
+export type RevokeResult = {
+  docHash: string
+  txHash: string
+  status: 'REVOKED'
+}
+
+export type SupersedeResult = {
+  docHash: string
+  oldHash: string
+  txHash: string
+  docId: string
+  citizen: string
+  downloadUrl: string
+  stamped: boolean
+}
+
+export type AuditOutcome = 'SUCCESS' | 'FAILURE' | 'DENIED' | 'PARTIAL_FAILURE'
+export type AuditAction =
+  | 'ISSUE'
+  | 'VERIFY_FILE'
+  | 'VERIFY_ID'
+  | 'REVOKE'
+  | 'SUPERSEDE'
+  | 'USER_PROFILE_CREATE'
+  | 'USER_PROFILE_UPDATE'
+
+export type AuditEvent = {
+  id: number
+  eventId: string
+  createdAt: string
+  actor: { id: string; email: string; name: string; role: string }
+  department: null | { id: string; name: string }
+  action: AuditAction
+  outcome: AuditOutcome
+  result: string
+  credential: {
+    docId: string | null
+    docHash: string | null
+    citizen: string | null
+    transactionHash: string | null
+    referenceHash: string | null
+  }
+  requestId: string
+  httpStatus: number
+  error: string | null
+  details: Record<string, unknown>
+  previousHash: string
+  entryHash: string
+}
+
+export type OperationCounts = {
+  total: number
+  success: number
+  failure: number
+  denied: number
+  partialFailure: number
+}
+
+export type MonitoringOverview = {
+  generatedAt: string
+  auditIntegrity: { valid: boolean; eventCount: number; firstInvalidEventId: number | null }
+  totals: OperationCounts
+  operations: Record<'issue' | 'verify' | 'revoke' | 'supersede', OperationCounts>
+  verificationResults: Record<Verdict, number>
+  departments: Array<{
+    id: string
+    name: string
+    active: boolean
+    events: number
+    success: number
+    failure: number
+    denied: number
+    partialFailure: number
+    issue: number
+    verify: number
+    revoke: number
+    supersede: number
+    lastActivityAt: string | null
+  }>
+  recentActivity: AuditEvent[]
+}
+
 async function json<T>(res: Response): Promise<T> {
   const raw = await res.text()
   let body: unknown = {}
@@ -105,6 +187,29 @@ export const getDepartments = () => request<Department[]>('/departments', {}, fa
 export const getMe = () => request<ApplicationUser>('/me')
 export const getCitizens = () => request<string[]>('/citizens')
 
+export const getAuditEvents = (query: {
+  limit?: number
+  before?: number
+  action?: AuditAction
+  outcome?: AuditOutcome
+  department?: string
+  documentId?: string
+  actorUserId?: string
+} = {}) => {
+  const params = new URLSearchParams()
+  Object.entries(query).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') params.set(key, String(value))
+  })
+  const suffix = params.size ? `?${params.toString()}` : ''
+  return request<{
+    events: AuditEvent[]
+    page: { limit: number; nextBefore: number | null; hasMore: boolean }
+  }>(`/audit-events${suffix}`)
+}
+
+export const getMonitoringOverview = () =>
+  request<MonitoringOverview>('/monitoring/overview')
+
 export const getCredentials = (citizen: string) =>
   request<{ citizen: string; documents: Credential[] }>(`/credentials/${encodeURIComponent(citizen)}`)
     .then((r) => r.documents)
@@ -132,6 +237,29 @@ export const issueDocument = (fields: {
   form.append('doc_id', fields.docId)
   form.append('citizen', fields.citizen)
   return request<IssueResult>('/issue', { method: 'POST', body: form })
+}
+
+export const revokeDocument = (docHash: string, dept: string) =>
+  request<RevokeResult>('/revoke', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ docHash, dept }),
+  })
+
+export const supersedeDocument = (fields: {
+  file: File
+  dept: string
+  oldHash: string
+  docId: string
+  citizen: string
+}) => {
+  const form = new FormData()
+  form.append('file', fields.file)
+  form.append('dept', fields.dept)
+  form.append('old_hash', fields.oldHash)
+  form.append('doc_id', fields.docId)
+  form.append('citizen', fields.citizen)
+  return request<SupersedeResult>('/supersede', { method: 'POST', body: form })
 }
 
 export async function downloadDocument(path: string, filename: string) {

@@ -61,7 +61,7 @@ func TestUserProfileConstraintsAndLookup(t *testing.T) {
 		SupabaseUserID: "official-1", Email: "official@example.gov",
 		DisplayName: "Birth Official", Role: "OFFICIAL", Active: true,
 	}
-	if err := s.UpsertUserProfile(valid, "birth"); err != nil {
+	if err := s.UpsertUserProfileAudited(valid, "birth", AuditActor{ID: "test", Role: "SYSTEM"}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.UserProfileByID(valid.SupabaseUserID)
@@ -84,7 +84,7 @@ func TestUserProfileConstraintsAndLookup(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := s.UpsertUserProfile(tc.profile, tc.department); err == nil {
+			if err := s.UpsertUserProfileAudited(tc.profile, tc.department, AuditActor{ID: "test", Role: "SYSTEM"}); err == nil {
 				t.Fatal("expected database constraint error")
 			}
 		})

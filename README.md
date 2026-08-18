@@ -4,9 +4,16 @@ Departments issue documents to citizens. Anyone can check that a document is aut
 and current. A smart contract holds the hash and metadata; the PDFs themselves stay
 off-chain. Tampering shows up as a hash mismatch.
 
+Supabase authenticates people, SQLite owns human roles and department assignments,
+and Solidity owns department-wallet credential authority and lifecycle state. Phase 2
+adds hash-chained audit history, department-scoped Admin audit access, and system-wide
+Controller monitoring. The full API contract is in [`docs/API.md`](docs/API.md).
+
 ## Run it
 
-The backend requires `SUPABASE_URL`. Credential operations also require a
+The backend requires `SUPABASE_URL`. The frontend requires
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`; `VITE_API_URL` is an
+optional backend override. Credential operations also require a
 Supabase user with a backend profile. Provision an existing Supabase user's
 `sub` non-interactively with:
 
@@ -29,9 +36,9 @@ contain an authentication bypass.
 make demo
 ```
 
-One command from a clean clone: boots Anvil, deploys the registry, seeds the three
-department roles, issues three documents each to two citizens, corrects one, revokes
-another, and starts the API and the web app.
+One command from a clean clone: boots Anvil, deploys the registry, provisions the three
+department Admin profiles, issues three documents each to two citizens, corrects one,
+revokes another, and starts the API and the web app.
 
 ```
 frontend  http://127.0.0.1:5173
@@ -59,10 +66,14 @@ Needs Go 1.22+, Node 20+, and [Foundry](https://getfoundry.sh) (`curl -L https:/
 | `never-issued-driving-licence.pdf` | `NOT_ISSUED` | well-formed, but no such docId |
 
 ```sh
-curl -s -F file=@demo-files/asha-menon-birth-certificate-v1.pdf localhost:8088/verify | jq
-curl -s -F file=@demo-files/rahul-iyer-degree-TAMPERED.pdf      localhost:8088/verify | jq
-curl -s localhost:8088/verify/BC-2019-004471 | jq   # what a QR scan hits
-curl -s 'localhost:8088/credentials/Asha%20Menon'  | jq   # v1 and v2, side by side
+curl -s -H "Authorization: Bearer $SEED_BIRTH_TOKEN" \
+  -F file=@demo-files/asha-menon-birth-certificate-v1.pdf localhost:8088/verify | jq
+curl -s -H "Authorization: Bearer $SEED_EDUCATION_TOKEN" \
+  -F file=@demo-files/rahul-iyer-degree-TAMPERED.pdf localhost:8088/verify | jq
+curl -s -H "Authorization: Bearer $SEED_BIRTH_TOKEN" \
+  localhost:8088/verify/BC-2019-004471 | jq
+curl -s -H "Authorization: Bearer $SEED_BIRTH_TOKEN" \
+  'localhost:8088/credentials/Asha%20Menon' | jq
 ```
 
 ### Corrections keep their history
@@ -129,7 +140,8 @@ The centrepiece is the role gate. Transport Dept holds the driving-licence role,
 contract rejects it issuing a birth certificate:
 
 ```sh
-curl -s -F file=@demo-files/asha-menon-degree.pdf -F dept=transport \
+curl -s -H "Authorization: Bearer $SEED_TRANSPORT_TOKEN" \
+     -F file=@demo-files/asha-menon-degree.pdf -F dept=transport \
      -F doc_type=birth_certificate -F doc_id=BC-FAKE-1 -F citizen=Mallory \
      localhost:8088/issue
 # 403 — contract rejected the call (department not authorised for this document type)
@@ -147,7 +159,8 @@ frontend/    React + TypeScript + Tailwind (Vite)
 
 ### Frontend
 
-Three screens, no router — the QR encodes a bare docId, not a URL.
+The application uses tab navigation rather than a router; the QR encodes a bare docId,
+not a URL.
 
 - **Verify** — drag-drop or pick a PDF. One large colour-coded verdict panel. A tampered
   document shows the expected and computed hashes stacked, with every differing character
@@ -157,6 +170,14 @@ Three screens, no router — the QR encodes a bare docId, not a URL.
   success it shows the anchored hash and a download link for the stamped PDF.
 - **Citizen** — pick a citizen, see their credentials with status badges. Asha's superseded
   v1 and current v2 both appear.
+- **Monitoring** and **Audit Events** — minimal temporary Phase 2 validation screens for
+  Controller system-wide monitoring and Controller/Admin audit access.
+- **Revoke** and **Supersede** — minimal temporary Admin lifecycle validation forms.
+
+The Phase 2 screens are intentionally replaceable validation UI, not the frontend team's
+final dashboard. Backend RBAC remains authoritative: Controllers receive Monitoring and
+system-wide Audit only; department Admins receive Issue, Verify, Revoke, Supersede, and
+department Audit; Officials receive Issue and Verify only.
 
 ## Screenshots
 
@@ -176,6 +197,10 @@ Education departments.
 
 ### API
 
+The complete frontend/backend contract, including authentication, RBAC, exact
+request and response shapes, errors, audit history, and Controller monitoring,
+is maintained in [`docs/API.md`](docs/API.md).
+
 | Method | Path | |
 | --- | --- | --- |
 | POST | `/issue` | multipart: `file`, `dept`, `doc_type`, `doc_id`, `citizen`; stamps, then anchors |
@@ -186,6 +211,10 @@ Education departments.
 | GET | `/credentials/{citizen}` | documents with live on-chain status |
 | GET | `/departments`, `/citizens`, `/health` | |
 | GET | `/documents/{hash}/download` | the stored PDF |
+| GET | `/me` | authenticated SQLite application profile |
+| GET | `/auth-test` | temporary authentication diagnostic |
+| GET | `/audit-events` | Controller system-wide or Admin department-scoped audit history |
+| GET | `/monitoring/overview` | Controller-only system monitoring summary |
 
 ## Demo-grade shortcuts
 
@@ -195,4 +224,7 @@ Education departments.
   anything it cannot parse gets the comment fallback.
 - Supabase authentication and backend RBAC protect credential operations, but department
   transaction keys are still Anvil defaults baked into the backend. Never do this anywhere real.
+- Audit rows are hash-chained and integrity-checkable, but SQLite has no external checkpoint;
+  a database administrator could replace or recompute the complete database history.
+- Monitoring and audit data cover retained Phase 2 audit events, not older operations.
 - Local Anvil only, no testnet, no internet.
