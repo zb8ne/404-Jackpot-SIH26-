@@ -12,12 +12,16 @@ FRONTEND  := frontend
 RUN       := .run
 DEPLOYMENT := $(CONTRACTS)/deployment.txt
 
+SEED_BIRTH_EMAIL     ?= birth-admin@example.gov
+SEED_TRANSPORT_EMAIL ?= transport-admin@example.gov
+SEED_EDUCATION_EMAIL ?= education-admin@example.gov
+
 export PATH := $(PATH):$(HOME)/.foundry/bin:$(HOME)/.config/.foundry/bin:$(HOME)/go/bin
 
-.PHONY: demo test build deploy anvil seed backend frontend stop clean tools
+.PHONY: demo test build deploy anvil profiles seed backend frontend stop clean tools
 
 ## demo: everything, from a clean clone, in one command
-demo: stop clean tools build anvil deploy backend seed frontend
+demo: stop clean tools build anvil deploy backend profiles seed frontend
 	@echo
 	@echo "=============================================================="
 	@echo " demo is up"
@@ -59,7 +63,7 @@ test:
 ## build: compile contracts and the Go binaries into ./bin
 build: test
 	@mkdir -p bin
-	cd $(BACKEND) && go build -o ../bin/server ./cmd/server && go build -o ../bin/seed ./cmd/seed
+	cd $(BACKEND) && go build -o ../bin/server ./cmd/server && go build -o ../bin/seed ./cmd/seed && go build -o ../bin/profile-seed ./cmd/profile-seed
 
 ## anvil: start a local node in the background
 anvil:
@@ -91,7 +95,16 @@ backend:
 	@curl -sf $(API_URL)/health >/dev/null || { echo "backend never came up; see $(RUN)/backend.log"; exit 1; }
 	@echo "backend up on $(API_URL)"
 
-## seed: two citizens, three documents each, plus superseded/revoked/tampered/never-issued copies
+## profiles: provision demo Supabase users in backend RBAC (requires SEED_*_USER_ID)
+profiles:
+	@test -n "$(SEED_BIRTH_USER_ID)" || { echo "SEED_BIRTH_USER_ID is required"; exit 1; }
+	@test -n "$(SEED_TRANSPORT_USER_ID)" || { echo "SEED_TRANSPORT_USER_ID is required"; exit 1; }
+	@test -n "$(SEED_EDUCATION_USER_ID)" || { echo "SEED_EDUCATION_USER_ID is required"; exit 1; }
+	./bin/profile-seed -db $(BACKEND)/credentials.db -id "$(SEED_BIRTH_USER_ID)" -email "$(SEED_BIRTH_EMAIL)" -name "Birth Demo Admin" -role ADMIN -department birth
+	./bin/profile-seed -db $(BACKEND)/credentials.db -id "$(SEED_TRANSPORT_USER_ID)" -email "$(SEED_TRANSPORT_EMAIL)" -name "Transport Demo Admin" -role ADMIN -department transport
+	./bin/profile-seed -db $(BACKEND)/credentials.db -id "$(SEED_EDUCATION_USER_ID)" -email "$(SEED_EDUCATION_EMAIL)" -name "Education Demo Admin" -role ADMIN -department education
+
+## seed: authenticated demo documents (requires SEED_*_TOKEN)
 seed:
 	./bin/seed -api $(API_URL) -out demo-files
 

@@ -6,6 +6,25 @@ off-chain. Tampering shows up as a hash mismatch.
 
 ## Run it
 
+The backend requires `SUPABASE_URL`. Credential operations also require a
+Supabase user with a backend profile. Provision an existing Supabase user's
+`sub` non-interactively with:
+
+```sh
+cd backend
+go run ./cmd/profile-seed -db credentials.db \
+  -id '<supabase-user-id>' -email official@example.gov \
+  -name 'Birth Official' -role OFFICIAL -department birth
+```
+
+`CONTROLLER` profiles omit `-department`; `ADMIN` and `OFFICIAL` profiles must
+use `birth`, `transport`, or `education`. The demo seeder requires department
+ADMIN access tokens through `SEED_BIRTH_TOKEN`, `SEED_TRANSPORT_TOKEN`, and
+`SEED_EDUCATION_TOKEN`. For a clean `make demo`, also set the matching
+`SEED_BIRTH_USER_ID`, `SEED_TRANSPORT_USER_ID`, and `SEED_EDUCATION_USER_ID`;
+the Makefile provisions those backend profiles before seeding. It does not
+contain an authentication bypass.
+
 ```sh
 make demo
 ```
@@ -174,7 +193,6 @@ Education departments.
   here — it is what makes tampering detectable at all.
 - The PDF stamper handles classic cross-reference tables, not compressed xref streams;
   anything it cannot parse gets the comment fallback.
-- No auth. The department is a picker, and its private key is an Anvil default baked into
-  the backend. Never do this anywhere real.
+- Supabase authentication and backend RBAC protect credential operations, but department
+  transaction keys are still Anvil defaults baked into the backend. Never do this anywhere real.
 - Local Anvil only, no testnet, no internet.
-

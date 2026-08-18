@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"credreg/backend/internal/pdfdoc"
@@ -89,7 +90,18 @@ const correctedDocID = "BC-2019-004471-R1"
 func main() {
 	apiURL := flag.String("api", "http://127.0.0.1:8088", "backend base URL")
 	outDir := flag.String("out", "demo-files", "where to write the seeded PDFs")
+	birthToken := flag.String("birth-token", os.Getenv("SEED_BIRTH_TOKEN"), "Supabase access token for a Birth ADMIN")
+	transportToken := flag.String("transport-token", os.Getenv("SEED_TRANSPORT_TOKEN"), "Supabase access token for a Transport ADMIN")
+	educationToken := flag.String("education-token", os.Getenv("SEED_EDUCATION_TOKEN"), "Supabase access token for an Education ADMIN")
 	flag.Parse()
+	tokens := map[string]string{
+		"birth": *birthToken, "transport": *transportToken, "education": *educationToken,
+	}
+	for department, token := range tokens {
+		if token == "" {
+			log.Fatalf("a non-interactive Supabase token is required for %s (flag -%s-token or SEED_%s_TOKEN)", department, department, strings.ToUpper(department))
+		}
+	}
 
 	if err := waitForAPI(*apiURL, 30*time.Second); err != nil {
 		log.Fatal(err)
@@ -105,14 +117,14 @@ func main() {
 		// Rendered unmarked on purpose: /issue is what stamps a document with its
 		// QR and marker, so seeded documents travel exactly the same path as ones
 		// a department issues live on stage.
-		hash, err := issue(*apiURL, d, pdfdoc.Render(d.title, d.lines))
+		hash, err := issue(*apiURL, tokens[d.dept], d, pdfdoc.Render(d.title, d.lines))
 		if err != nil {
 			log.Fatalf("issuing %s: %v", d.docID, err)
 		}
 		log.Printf("issued  %-18s %-22s %s  %s", d.docType, d.docID, d.citizen, hash[:18]+"...")
 
 		// What the citizen holds is the stamped copy the backend produced.
-		if err := download(*apiURL, hash, filepath.Join(*outDir, d.filename)); err != nil {
+		if err := download(*apiURL, tokens[d.dept], hash, filepath.Join(*outDir, d.filename)); err != nil {
 			log.Fatalf("downloading %s: %v", d.docID, err)
 		}
 
@@ -134,12 +146,12 @@ func main() {
 	if supersedeHash == "" {
 		log.Fatalf("never captured the hash of %s, cannot supersede it", supersededDocID)
 	}
-	correctedHash, err := supersede(*apiURL, supersedeHash, correctedDocID, "birth", "Asha Menon", corrected)
+	correctedHash, err := supersede(*apiURL, tokens["birth"], supersedeHash, correctedDocID, "birth", "Asha Menon", corrected)
 	if err != nil {
 		log.Fatalf("superseding %s: %v", supersededDocID, err)
 	}
 	correctedPath := filepath.Join(*outDir, "asha-menon-birth-certificate-v2.pdf")
-	if err := download(*apiURL, correctedHash, correctedPath); err != nil {
+	if err := download(*apiURL, tokens["birth"], correctedHash, correctedPath); err != nil {
 		log.Fatal(err)
 	}
 	log.Printf("superseded %-17s %s -> %s", "birth_certificate", supersededDocID, correctedDocID)
@@ -174,7 +186,7 @@ func main() {
 
 	// And revoke one genuine licence.
 	if revokeHash != "" {
-		if err := revoke(*apiURL, revokeHash, revokeDept); err != nil {
+		if err := revoke(*apiURL, tokens[revokeDept], revokeHash, revokeDept); err != nil {
 			log.Fatalf("revoking %s: %v", revokedDocID, err)
 		}
 		log.Printf("revoked %-18s %s", "driving_licence", revokedDocID)
@@ -205,7 +217,7 @@ func waitForAPI(base string, limit time.Duration) error {
 }
 
 // issue posts one document and returns its on-chain hash.
-func issue(base string, d doc, pdf []byte) (string, error) {
+func issue(base, token string, d doc, pdf []byte) (string, error) {
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
 
@@ -227,7 +239,13 @@ func issue(base string, d doc, pdf []byte) (string, error) {
 		return "", err
 	}
 
-	resp, err := http.Post(base+"/issue", mw.FormDataContentType(), &body)
+	req, err := http.NewRequest(http.MethodPost, base+"/issue", &body)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -247,7 +265,7 @@ func issue(base string, d doc, pdf []byte) (string, error) {
 }
 
 // supersede uploads the corrected document and links it to the one it replaces.
-func supersede(base, oldHash, newDocID, dept, citizen string, pdf []byte) (string, error) {
+func supersede(base, token, oldHash, newDocID, dept, citizen string, pdf []byte) (string, error) {
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
 
@@ -269,7 +287,13 @@ func supersede(base, oldHash, newDocID, dept, citizen string, pdf []byte) (strin
 		return "", err
 	}
 
-	resp, err := http.Post(base+"/supersede", mw.FormDataContentType(), &body)
+	req, err := http.NewRequest(http.MethodPost, base+"/supersede", &body)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -289,8 +313,13 @@ func supersede(base, oldHash, newDocID, dept, citizen string, pdf []byte) (strin
 }
 
 // download fetches the stamped copy the backend produced and writes it out.
-func download(base, docHash, path string) error {
-	resp, err := http.Get(base + "/documents/" + docHash + "/download")
+func download(base, token, docHash, path string) error {
+	req, err := http.NewRequest(http.MethodGet, base+"/documents/"+docHash+"/download", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -306,9 +335,15 @@ func download(base, docHash, path string) error {
 	return os.WriteFile(path, pdf, 0o644)
 }
 
-func revoke(base, docHash, dept string) error {
+func revoke(base, token, docHash, dept string) error {
 	body, _ := json.Marshal(map[string]string{"docHash": docHash, "dept": dept})
-	resp, err := http.Post(base+"/revoke", "application/json", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, base+"/revoke", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}

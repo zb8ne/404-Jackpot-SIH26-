@@ -12,9 +12,11 @@ import (
 	"net/http"
 	"strings"
 
+	"credreg/backend/internal/auth"
 	"credreg/backend/internal/chain"
 	"credreg/backend/internal/docid"
 	"credreg/backend/internal/pdfdoc"
+	"credreg/backend/internal/rbac"
 	"credreg/backend/internal/store"
 )
 
@@ -27,26 +29,64 @@ type reader interface {
 	CurrentHashOf(ctx context.Context, docID string) ([32]byte, bool, error)
 }
 
-type Server struct {
-	chain  *chain.Client
-	reader reader
-	store  *store.Store
+type registry interface {
+	reader
+	Issue(context.Context, chain.Department, [32]byte, string, uint8) (string, error)
+	Supersede(context.Context, chain.Department, [32]byte, [32]byte, string, uint8) (string, error)
+	Revoke(context.Context, chain.Department, [32]byte, uint8) (string, error)
 }
 
-func New(c *chain.Client, s *store.Store) http.Handler {
-	srv := &Server{chain: c, reader: c, store: s}
+type Server struct {
+	chain           registry
+	reader          reader
+	store           *store.Store
+	contractAddress string
+}
+
+func New(c *chain.Client, s *store.Store, verifier auth.TokenVerifier) http.Handler {
+	return newHandler(c, s, verifier, c.Address.Hex())
+}
+
+func newHandler(c registry, s *store.Store, verifier auth.TokenVerifier, contractAddress string) http.Handler {
+
+	srv := &Server{chain: c, reader: c, store: s, contractAddress: contractAddress}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", srv.health)
 	mux.HandleFunc("GET /departments", srv.departments)
-	mux.HandleFunc("GET /citizens", srv.citizens)
-	mux.HandleFunc("POST /issue", srv.issue)
-	mux.HandleFunc("POST /verify", srv.verify)
-	mux.HandleFunc("GET /verify/{docId}", srv.verifyByID)
-	mux.HandleFunc("POST /revoke", srv.revoke)
-	mux.HandleFunc("POST /supersede", srv.supersede)
-	mux.HandleFunc("GET /credentials/{citizen}", srv.credentials)
-	mux.HandleFunc("GET /documents/{hash}/download", srv.download)
+
+	authenticated := func(next http.Handler) http.Handler {
+		return auth.Middleware(verifier)(rbac.LoadProfile(s)(next))
+	}
+	protected := func(permission rbac.Permission, handler http.HandlerFunc) http.Handler {
+		return authenticated(rbac.Require(permission)(handler))
+	}
+
+	mux.Handle("GET /me", authenticated(http.HandlerFunc(srv.me)))
+	mux.Handle("GET /citizens", protected(rbac.PermissionViewDept, srv.citizens))
+	mux.Handle("POST /issue", protected(rbac.PermissionIssue, srv.issue))
+	mux.Handle("POST /verify", protected(rbac.PermissionVerify, srv.verify))
+	mux.Handle("GET /verify/{docId}", protected(rbac.PermissionVerify, srv.verifyByID))
+	mux.Handle("POST /revoke", protected(rbac.PermissionRevoke, srv.revoke))
+	mux.Handle("POST /supersede", protected(rbac.PermissionSupersede, srv.supersede))
+	mux.Handle("GET /credentials/{citizen}", protected(rbac.PermissionViewDept, srv.credentials))
+	mux.Handle("GET /documents/{hash}/download", protected(rbac.PermissionViewDept, srv.download))
+
+	// TEMPORARY: test Supabase JWT authentication.
+	mux.Handle("GET /auth-test", auth.Middleware(verifier)(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user, ok := auth.UserFromContext(r.Context())
+			if !ok {
+				http.Error(w, "user missing from context", http.StatusInternalServerError)
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]any{
+				"id":    user.ID,
+				"email": user.Email,
+			})
+		}),
+	))
 
 	return cors(mux)
 }
@@ -56,24 +96,83 @@ func New(c *chain.Client, s *store.Store) http.Handler {
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,
-		"contract": s.chain.Address.Hex(),
+		"contract": s.contractAddress,
 	})
 }
 
 func (s *Server) departments(w http.ResponseWriter, r *http.Request) {
-	type dept struct {
-		chain.Department
+	type departmentResponse struct {
+		ID          string `json:"id"`
+		Slug        string `json:"slug"`
+		Name        string `json:"name"`
+		DocType     uint8  `json:"docType"`
 		DocTypeName string `json:"docTypeName"`
+		Address     string `json:"address"`
 	}
-	out := []dept{}
-	for _, d := range chain.Departments() {
-		out = append(out, dept{Department: d, DocTypeName: chain.DocTypeName(d.DocType)})
+	departments, err := s.store.Departments()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := []departmentResponse{}
+	for _, d := range departments {
+		if !d.Active {
+			continue
+		}
+		chainDepartment, ok := chain.DepartmentBySlug(d.ID)
+		if !ok || chainDepartment.DocType != d.DocType {
+			continue
+		}
+		out = append(out, departmentResponse{
+			ID: d.ID, Slug: d.ID, Name: d.DisplayName, DocType: d.DocType,
+			DocTypeName: chain.DocTypeName(d.DocType), Address: chainDepartment.Address,
+		})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (s *Server) me(w http.ResponseWriter, r *http.Request) {
+	principal, ok := rbac.PrincipalFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "application profile missing from context")
+		return
+	}
+
+	type departmentResponse struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		DocType     uint8  `json:"docType"`
+		DocTypeName string `json:"docTypeName"`
+	}
+	type meResponse struct {
+		ID         string              `json:"id"`
+		Email      string              `json:"email"`
+		Name       string              `json:"name"`
+		Role       string              `json:"role"`
+		Active     bool                `json:"active"`
+		Department *departmentResponse `json:"department"`
+	}
+
+	response := meResponse{
+		ID: principal.Profile.SupabaseUserID, Email: principal.Profile.Email,
+		Name: principal.Profile.DisplayName, Role: principal.Profile.Role,
+		Active: principal.Profile.Active,
+	}
+	if d := principal.Profile.Department; d != nil {
+		response.Department = &departmentResponse{
+			ID: d.ID, Name: d.DisplayName, DocType: d.DocType,
+			DocTypeName: chain.DocTypeName(d.DocType),
+		}
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
 func (s *Server) citizens(w http.ResponseWriter, r *http.Request) {
-	names, err := s.store.Citizens()
+	_, docTypeName, ok := requestDepartment(w, r)
+	if !ok {
+		return
+	}
+	names, err := s.store.CitizensByDocType(docTypeName)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -90,10 +189,12 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deptSlug := r.FormValue("dept")
-	dept, ok := chain.DepartmentBySlug(deptSlug)
+	dept, expectedDocTypeName, ok := requestDepartment(w, r)
 	if !ok {
-		writeErr(w, http.StatusBadRequest, fmt.Sprintf("unknown department %q", deptSlug))
+		return
+	}
+	if supplied := r.FormValue("dept"); supplied != "" && supplied != dept.Slug {
+		writeErr(w, http.StatusForbidden, "cannot issue for another department")
 		return
 	}
 
@@ -101,6 +202,10 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 	docType, ok := chain.DocTypeByName(docTypeName)
 	if !ok {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("unknown doc_type %q", docTypeName))
+		return
+	}
+	if docTypeName != expectedDocTypeName || docType != dept.DocType {
+		writeErr(w, http.StatusForbidden, "document type is outside the authenticated department")
 		return
 	}
 
@@ -188,6 +293,9 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	if !authorizeVerificationResponse(w, r, resp) {
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -204,6 +312,9 @@ func (s *Server) verifyByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.resolve(r.Context(), id, "", resp); err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if !authorizeVerificationResponse(w, r, resp) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -345,14 +456,30 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dept, ok := chain.DepartmentBySlug(body.Dept)
+	dept, _, ok := requestDepartment(w, r)
 	if !ok {
-		writeErr(w, http.StatusBadRequest, fmt.Sprintf("unknown department %q", body.Dept))
+		return
+	}
+	if body.Dept != "" && body.Dept != dept.Slug {
+		writeErr(w, http.StatusForbidden, "cannot revoke for another department")
 		return
 	}
 	hash, err := parseHash(body.DocHash)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	record, err := s.reader.Verify(r.Context(), hash)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if !record.Found {
+		writeErr(w, http.StatusNotFound, "no such credential")
+		return
+	}
+	if record.DocType != dept.DocType {
+		writeErr(w, http.StatusForbidden, "credential is outside the authenticated department")
 		return
 	}
 
@@ -374,15 +501,31 @@ func (s *Server) supersede(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dept, ok := chain.DepartmentBySlug(r.FormValue("dept"))
+	dept, _, ok := requestDepartment(w, r)
 	if !ok {
-		writeErr(w, http.StatusBadRequest, fmt.Sprintf("unknown department %q", r.FormValue("dept")))
+		return
+	}
+	if supplied := r.FormValue("dept"); supplied != "" && supplied != dept.Slug {
+		writeErr(w, http.StatusForbidden, "cannot supersede for another department")
 		return
 	}
 
 	oldHash, err := parseHash(r.FormValue("old_hash"))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	oldRecord, err := s.reader.Verify(r.Context(), oldHash)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if !oldRecord.Found {
+		writeErr(w, http.StatusNotFound, "no such credential")
+		return
+	}
+	if oldRecord.DocType != dept.DocType {
+		writeErr(w, http.StatusForbidden, "credential is outside the authenticated department")
 		return
 	}
 
@@ -426,8 +569,12 @@ func (s *Server) supersede(w http.ResponseWriter, r *http.Request) {
 // credentials lists a citizen's documents, each with its live on-chain status.
 func (s *Server) credentials(w http.ResponseWriter, r *http.Request) {
 	citizen := r.PathValue("citizen")
+	_, docTypeName, ok := requestDepartment(w, r)
+	if !ok {
+		return
+	}
 
-	docs, err := s.store.ByCitizen(citizen)
+	docs, err := s.store.ByCitizenAndDocType(citizen, docTypeName)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -452,7 +599,25 @@ func (s *Server) credentials(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) download(w http.ResponseWriter, r *http.Request) {
-	pdf, ok, err := s.store.PDF(r.PathValue("hash"))
+	_, docTypeName, authorized := requestDepartment(w, r)
+	if !authorized {
+		return
+	}
+	hash := r.PathValue("hash")
+	document, ok, err := s.store.ByHash(hash)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		writeErr(w, http.StatusNotFound, "no such document")
+		return
+	}
+	if document.DocType != docTypeName {
+		writeErr(w, http.StatusForbidden, "document is outside the authenticated department")
+		return
+	}
+	pdf, ok, err := s.store.PDF(hash)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -525,12 +690,40 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
+func requestDepartment(w http.ResponseWriter, r *http.Request) (chain.Department, string, bool) {
+	principal, ok := rbac.PrincipalFromContext(r.Context())
+	if !ok || principal.Profile.Department == nil {
+		writeErr(w, http.StatusForbidden, "a department profile is required")
+		return chain.Department{}, "", false
+	}
+	profileDepartment := principal.Profile.Department
+	department, ok := chain.DepartmentBySlug(profileDepartment.ID)
+	if !ok || department.DocType != profileDepartment.DocType {
+		writeErr(w, http.StatusInternalServerError, "department configuration does not match the chain")
+		return chain.Department{}, "", false
+	}
+	return department, chain.DocTypeName(department.DocType), true
+}
+
+func authorizeVerificationResponse(w http.ResponseWriter, r *http.Request, response map[string]any) bool {
+	_, expectedDocType, ok := requestDepartment(w, r)
+	if !ok {
+		return false
+	}
+	actual, present := response["docType"].(string)
+	if present && actual != "" && actual != expectedDocType {
+		writeErr(w, http.StatusForbidden, "credential is outside the authenticated department")
+		return false
+	}
+	return true
+}
+
 // cors keeps the frontend (a later step) able to call this from Vite's dev port.
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
