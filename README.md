@@ -16,54 +16,13 @@ backend reveals the current chain-backed verdict.
 
 ## Run it
 
-The backend requires `SUPABASE_URL`. The frontend requires
-`VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`; `VITE_API_URL` is an
-optional backend override. Credential operations also require a
-Supabase user with a backend profile. Provision an existing Supabase user's
-`sub` non-interactively with:
-
 ```sh
-cd backend
-go run ./cmd/profile-seed -db credentials.db \
-  -id '<supabase-user-id>' -email official@example.gov \
-  -name 'Birth Official' -role OFFICIAL -department birth
+doppler run -- docker compose up
 ```
 
-`CONTROLLER` profiles omit `-department`; `ADMIN` and `OFFICIAL` profiles must
-use `birth`, `transport`, or `education`. The demo seeder requires department
-ADMIN access tokens through `SEED_BIRTH_TOKEN`, `SEED_TRANSPORT_TOKEN`, and
-`SEED_EDUCATION_TOKEN`. For a clean `make demo`, also set the matching
-`SEED_BIRTH_USER_ID`, `SEED_TRANSPORT_USER_ID`, and `SEED_EDUCATION_USER_ID`;
-the Makefile provisions those backend profiles before seeding. It does not
-contain an authentication bypass.
-
-The backend uses `PUBLIC_WEB_URL` (default `http://127.0.0.1:5173`) as the
-explicit base URL embedded in new QR codes. Citizen accounts require an email;
-phone is optional and is not used for consent. Accounts are provisioned through
-controlled tooling:
-
-```sh
-cd backend
-go run ./cmd/citizen-seed -db credentials.db -id citizen-asha \
-  -name 'Asha Menon' -email asha@example.test
-```
-
-Use `-link-doc-id` only when explicitly linking an older stored credential.
-Ownership is never inferred from a name or email address.
-
-```sh
-doppler run -- docker compose up          # everything in containers
-```
-
-or, on the host:
-
-```sh
-make demo
-```
-
-One command from a clean clone: boots Anvil, deploys the registry, provisions the three
-department Admin profiles, issues three documents each to two citizens, corrects one,
-revokes another, and starts the API and the web app.
+That is the whole thing: Anvil, the contract deploy, department and citizen profiles,
+the API, the seeded documents, and the web app. Nothing but Docker is needed on the
+host — no Go, no Node, no Foundry.
 
 ```
 frontend  http://127.0.0.1:5173
@@ -72,28 +31,76 @@ anvil     http://127.0.0.1:8545
 ```
 
 ```sh
-make stop     # kill anvil + backend
+docker compose down -v      # stop, and throw away the chain and database
+docker compose logs -f backend
+```
+
+If a port is already taken on your machine, override it — the app does not care:
+
+```sh
+WEB_PORT=5174 doppler run -- docker compose up
+```
+
+### Without Doppler
+
+Every value comes from the environment, so anything that exports them works. Copy
+`.env.example` to `.env` and fill it in, and plain `docker compose up` picks it up.
+Nothing is baked into an image, and a missing value fails immediately with a message
+naming the variable rather than a crash you have to decode.
+
+### On the host instead
+
+```sh
+make demo     # same stack, run directly on the host
+make stop     # kill anvil, backend and frontend
 make test     # contract tests + the verify state machine
 ```
 
-### Containers
+Needs Go 1.22+, Node 20+, and [Foundry](https://getfoundry.sh)
+(`curl -L https://foundry.paradigm.xyz | bash && foundryup`).
 
-`docker compose up` runs the whole stack — anvil, the contract deploy, profile and
-document seeding, the API and the web app — with no Go, Node or Foundry on the host.
-Services start in dependency order; the seeding steps are one-shot and exit 0.
+## Configuration
 
-Secrets are never baked into an image. Every value comes from the environment, so
-`doppler run --` supplies them, or copy `.env.example` to `.env`. Missing ones fail fast
-with a message naming the variable rather than a confusing crash.
+The backend needs `SUPABASE_URL`; the frontend needs `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_PUBLISHABLE_KEY`. `VITE_API_URL` overrides the backend address, and
+`PUBLIC_WEB_URL` (default `http://127.0.0.1:5173`) is the base URL embedded in new QR
+codes. There is no authentication bypass.
 
-Published ports are overridable (`ANVIL_PORT`, `API_PORT`, `WEB_PORT`) for machines where
-something already owns 5173 or 8088.
+Credential operations need a Supabase user with a backend profile. `make demo` and the
+compose `profiles` step provision the three department Admins from
+`SEED_BIRTH_USER_ID`, `SEED_TRANSPORT_USER_ID` and `SEED_EDUCATION_USER_ID`.
 
-Needs Go 1.22+, Node 20+, and [Foundry](https://getfoundry.sh) (`curl -L https://foundry.paradigm.xyz | bash && foundryup`).
+The document seeder issues through the real REST API, so it also needs department Admin
+**access tokens** in `SEED_BIRTH_TOKEN`, `SEED_TRANSPORT_TOKEN` and
+`SEED_EDUCATION_TOKEN`. These are short-lived JWTs — they expire in about an hour, so a
+seeded run needs freshly minted tokens.
+
+To provision a profile by hand, using an existing Supabase user's `sub`:
+
+```sh
+cd backend
+go run ./cmd/profile-seed -db credentials.db \
+  -id '<supabase-user-id>' -email official@example.gov \
+  -name 'Birth Official' -role OFFICIAL -department birth
+```
+
+`CONTROLLER` profiles omit `-department`; `ADMIN` and `OFFICIAL` must use `birth`,
+`transport` or `education`.
+
+Citizen accounts require an email; phone is optional and is not used for consent:
+
+```sh
+cd backend
+go run ./cmd/citizen-seed -db credentials.db -id citizen-asha \
+  -name 'Asha Menon' -email asha@example.test
+```
+
+Use `-link-doc-id` only when explicitly linking an older stored credential. Ownership is
+never inferred from a name or email address.
 
 ## The demo
 
-`make demo` writes signed PDFs to `./demo-files/`, one for each verdict:
+Either run path seeds the same documents into `./demo-files/`, one per verdict:
 
 | File | Verdict | |
 | --- | --- | --- |
@@ -194,7 +201,14 @@ Same rule, proved at the contract level, in `test_TransportDeptCannotIssueBirthC
 contracts/   Solidity + Foundry tests + deploy script
 backend/     Go REST API (ethclient + abigen bindings, SQLite for PDFs)
 frontend/    React + TypeScript + Tailwind (Vite)
+docs/        API contract
+docker-compose.yml   the whole stack; Dockerfiles live in backend/ and frontend/
 ```
+
+The backend image is built in two stages: a distroless `runtime` for the server, and an
+alpine `tools` stage carrying the seed binaries, which need a shell. Named volumes are
+handed to the unprivileged runtime user by an `init-volumes` step before anything writes
+to them.
 
 ### Frontend
 
@@ -222,10 +236,6 @@ The Phase 2 screens are intentionally replaceable validation UI, not the fronten
 final dashboard. Backend RBAC remains authoritative: Controllers receive Monitoring and
 system-wide Audit only; department Admins receive Issue, Verify, Revoke, Supersede, and
 department Audit; Officials receive Issue and Verify only.
-
-## Screenshots
-
-_TODO._
 
 ### Contract
 
@@ -278,4 +288,11 @@ is maintained in [`docs/API.md`](docs/API.md).
 - The prototype email notifier keeps raw consent URLs only in backend process memory;
   links disappear on restart and no real email is delivered.
 - Consent tokens expire after 15 minutes. SQLite stores only their SHA-256 hashes.
-- Local Anvil only, no testnet, no internet.
+- The document seeder needs live department access tokens, which expire in about an hour,
+  so a freshly seeded run needs freshly minted ones.
+- The chain is a local Anvil node, no testnet — but token verification calls Supabase, so
+  the stack is no longer runnable offline.
+
+## Screenshots
+
+_TODO._
