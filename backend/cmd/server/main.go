@@ -21,7 +21,7 @@ import (
 
 func main() {
 	var (
-		addr         = flag.String("addr", envOr("ADDR", ":8088"), "listen address")
+		addr         = flag.String("addr", listenAddr(), "listen address")
 		rpcURL       = flag.String("rpc", envOr("RPC_URL", "http://127.0.0.1:8545"), "Anvil JSON-RPC endpoint")
 		dbPath       = flag.String("db", envOr("DB_PATH", "credentials.db"), "SQLite file")
 		contractFlag = flag.String("contract", os.Getenv("CONTRACT_ADDRESS"), "registry address (defaults to contracts/deployment.txt)")
@@ -97,6 +97,16 @@ func validateDepartments(st *store.Store) error {
 		}
 	}
 	return nil
+}
+
+// listenAddr resolves where to listen. Platforms like Railway assign a port at
+// run time and hand it over as PORT, so that wins when it is set; ADDR stays the
+// explicit override for local runs.
+func listenAddr() string {
+	if port := os.Getenv("PORT"); port != "" {
+		return ":" + port
+	}
+	return envOr("ADDR", ":8088")
 }
 
 func envOr(key, fallback string) string {

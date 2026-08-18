@@ -1,0 +1,166 @@
+# The whole demo in one command:
+#
+#   doppler run -- docker compose up
+#
+# Services come up in dependency order: the chain, then the contract deploy,
+# then profiles, the API, the document seed, and finally the web app. The
+# one-shot steps exit 0 and stay exited; only anvil, backend and frontend run on.
+#
+# Secrets are never baked into an image. Everything below reads from the
+# environment, so Doppler (or a plain .env) supplies them at run time.
+
+services:
+  # Docker creates named volumes owned by root, but the API runs unprivileged as
+  # the distroless "nonroot" user (65532). Hand it the volumes before anything
+  # writes to them, or the first SQLite write fails read-only.
+  init-volumes:
+    image: alpine:3.21
+    user: root
+    volumes:
+      - data:/data
+      - deployment:/deployment
+    # /data is written by the API (nonroot, 65532). /deployment is written by
+    # forge, which also writes build output into the bind-mounted contracts
+    # directory, so it runs as the host user instead. The address file it leaves
+    # behind is world-readable, which is all the API needs.
+    command:
+      - /bin/sh
+      - -c
+      - chown -R 65532:65532 /data && chown -R ${HOST_UID:-1000}:${HOST_GID:-1000} /deployment
+
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    # --host binds beyond loopback so sibling containers can reach the node.
+    entrypoint: ["anvil", "--host", "0.0.0.0", "--silent"]
+    ports:
+      - "${ANVIL_PORT:-8545}:8545"
+    healthcheck:
+      test: ["CMD", "cast", "block-number", "--rpc-url", "http://127.0.0.1:8545"]
+      interval: 2s
+      timeout: 4s
+      retries: 20
+      start_period: 2s
+
+  # One-shot: deploys the registry and seeds the three department roles, then
+  # publishes the address where the backend can read it.
+  deploy:
+    image: ghcr.io/foundry-rs/foundry:latest
+    depends_on:
+      anvil:
+        condition: service_healthy
+      init-volumes:
+        condition: service_completed_successfully
+    working_dir: /contracts
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    volumes:
+      - ./contracts:/contracts
+      - deployment:/deployment
+    environment:
+      DEPLOYER_KEY: ${DEPLOYER_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        # The health gate can still lose a race with DNS on a cold network, so
+        # wait for a reply from the node itself before deploying.
+        for i in $$(seq 1 30); do
+          cast block-number --rpc-url http://anvil:8545 >/dev/null 2>&1 && break
+          sleep 1
+        done
+        forge script script/Deploy.s.sol:Deploy --rpc-url http://anvil:8545 --broadcast
+        cp deployment.txt /deployment/deployment.txt
+        echo "registry deployed at $$(cat /deployment/deployment.txt)"
+
+  # One-shot: department admins and demo citizens. Writes straight to SQLite,
+  # creating the schema if the API has not booted yet.
+  profiles:
+    build:
+      context: ./backend
+      target: tools
+    depends_on:
+      deploy:
+        condition: service_completed_successfully
+    user: "65532:65532"
+    volumes:
+      - data:/data
+    environment:
+      SEED_BIRTH_USER_ID: ${SEED_BIRTH_USER_ID:?set SEED_BIRTH_USER_ID (Supabase user id for the Birth admin)}
+      SEED_TRANSPORT_USER_ID: ${SEED_TRANSPORT_USER_ID:?set SEED_TRANSPORT_USER_ID}
+      SEED_EDUCATION_USER_ID: ${SEED_EDUCATION_USER_ID:?set SEED_EDUCATION_USER_ID}
+      SEED_BIRTH_EMAIL: ${SEED_BIRTH_EMAIL:-birth.admin@example.test}
+      SEED_TRANSPORT_EMAIL: ${SEED_TRANSPORT_EMAIL:-transport.admin@example.test}
+      SEED_EDUCATION_EMAIL: ${SEED_EDUCATION_EMAIL:-education.admin@example.test}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        profile-seed -db /data/credentials.db -id "$$SEED_BIRTH_USER_ID"     -email "$$SEED_BIRTH_EMAIL"     -name "Birth Demo Admin"     -role ADMIN -department birth
+        profile-seed -db /data/credentials.db -id "$$SEED_TRANSPORT_USER_ID" -email "$$SEED_TRANSPORT_EMAIL" -name "Transport Demo Admin" -role ADMIN -department transport
+        profile-seed -db /data/credentials.db -id "$$SEED_EDUCATION_USER_ID" -email "$$SEED_EDUCATION_EMAIL" -name "Education Demo Admin" -role ADMIN -department education
+        citizen-seed -db /data/credentials.db -id asha-menon -name "Asha Menon" -email asha.menon@example.test
+        citizen-seed -db /data/credentials.db -id rahul-iyer -name "Rahul Iyer" -email rahul.iyer@example.test
+
+  backend:
+    build:
+      context: ./backend
+      target: runtime
+    depends_on:
+      profiles:
+        condition: service_completed_successfully
+    ports:
+      - "${API_PORT:-8088}:8088"
+    volumes:
+      - data:/data
+      - deployment:/deployment
+    environment:
+      RPC_URL: http://anvil:8545
+      SUPABASE_URL: ${SUPABASE_URL:?set SUPABASE_URL (the Supabase project URL)}
+      PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://127.0.0.1:5173}
+    restart: unless-stopped
+
+  # One-shot: the demo documents. Goes through the real REST API, so it needs
+  # live department tokens exactly as a human official would.
+  seed:
+    build:
+      context: ./backend
+      target: tools
+    depends_on:
+      backend:
+        condition: service_started
+    # Host uid, so the generated PDFs stay editable outside the container.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    volumes:
+      - ./demo-files:/demo-files
+    environment:
+      SEED_BIRTH_TOKEN: ${SEED_BIRTH_TOKEN:?set SEED_BIRTH_TOKEN (a Supabase access token for the Birth admin)}
+      SEED_TRANSPORT_TOKEN: ${SEED_TRANSPORT_TOKEN:?set SEED_TRANSPORT_TOKEN}
+      SEED_EDUCATION_TOKEN: ${SEED_EDUCATION_TOKEN:?set SEED_EDUCATION_TOKEN}
+    # The seeder polls /health itself, so it tolerates the API still starting.
+    command:
+      - seed -api http://backend:8088 -out /demo-files
+
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      backend:
+        condition: service_started
+    # Override WEB_PORT when something else on the machine already owns 5173.
+    ports:
+      - "${WEB_PORT:-5173}:5173"
+    volumes:
+      # Source is mounted for hot reload; node_modules stays the container's own,
+      # since the host copy is built for a different platform.
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+      - /app/node_modules
+    environment:
+      # Read by the browser, not the container, so it must be a host address.
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:${API_PORT:-8088}}
+      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:?set VITE_SUPABASE_URL}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY:?set VITE_SUPABASE_PUBLISHABLE_KEY}
+    restart: unless-stopped
+
+volumes:
+  data:
+  deployment:
