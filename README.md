@@ -52,6 +52,12 @@ Use `-link-doc-id` only when explicitly linking an older stored credential.
 Ownership is never inferred from a name or email address.
 
 ```sh
+doppler run -- docker compose up          # everything in containers
+```
+
+or, on the host:
+
+```sh
 make demo
 ```
 
@@ -69,6 +75,19 @@ anvil     http://127.0.0.1:8545
 make stop     # kill anvil + backend
 make test     # contract tests + the verify state machine
 ```
+
+### Containers
+
+`docker compose up` runs the whole stack — anvil, the contract deploy, profile and
+document seeding, the API and the web app — with no Go, Node or Foundry on the host.
+Services start in dependency order; the seeding steps are one-shot and exit 0.
+
+Secrets are never baked into an image. Every value comes from the environment, so
+`doppler run --` supplies them, or copy `.env.example` to `.env`. Missing ones fail fast
+with a message naming the variable rather than a confusing crash.
+
+Published ports are overridable (`ANVIL_PORT`, `API_PORT`, `WEB_PORT`) for machines where
+something already owns 5173 or 8088.
 
 Needs Go 1.22+, Node 20+, and [Foundry](https://getfoundry.sh) (`curl -L https://foundry.paradigm.xyz | bash && foundryup`).
 

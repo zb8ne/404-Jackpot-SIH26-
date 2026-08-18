@@ -9,3 +9,6 @@ contracts/broadcast/
 demo-files/
 contracts/deployment.txt
 backend/*.db
+
+# secrets
+.env
