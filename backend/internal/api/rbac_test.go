@@ -26,8 +26,11 @@ func (v apiVerifier) Verify(context.Context, string) (*auth.User, error) {
 }
 
 type apiRegistry struct {
-	records map[[32]byte]chain.Record
-	current map[string][32]byte
+	records      map[[32]byte]chain.Record
+	current      map[string][32]byte
+	issueErr     error
+	revokeErr    error
+	supersedeErr error
 }
 
 func (f *apiRegistry) Verify(_ context.Context, hash [32]byte) (chain.Record, error) {
@@ -45,12 +48,18 @@ func (f *apiRegistry) CurrentHashOf(_ context.Context, id string) ([32]byte, boo
 }
 
 func (f *apiRegistry) Issue(_ context.Context, _ chain.Department, hash [32]byte, id string, docType uint8) (string, error) {
+	if f.issueErr != nil {
+		return "", f.issueErr
+	}
 	f.records[hash] = chain.Record{Found: true, DocID: id, DocType: docType, Status: chain.StatusValid}
 	f.current[id] = hash
 	return "0xtx", nil
 }
 
 func (f *apiRegistry) Supersede(_ context.Context, _ chain.Department, oldHash, newHash [32]byte, id string, docType uint8) (string, error) {
+	if f.supersedeErr != nil {
+		return "", f.supersedeErr
+	}
 	old := f.records[oldHash]
 	old.Status = chain.StatusSuperseded
 	f.records[oldHash] = old
@@ -59,6 +68,9 @@ func (f *apiRegistry) Supersede(_ context.Context, _ chain.Department, oldHash, 
 }
 
 func (f *apiRegistry) Revoke(_ context.Context, _ chain.Department, hash [32]byte, _ uint8) (string, error) {
+	if f.revokeErr != nil {
+		return "", f.revokeErr
+	}
 	record := f.records[hash]
 	record.Status = chain.StatusRevoked
 	f.records[hash] = record
@@ -81,7 +93,7 @@ func rbacFixture(t *testing.T, role, department string) (http.Handler, *apiRegis
 		SupabaseUserID: "user-1", Email: "profile@example.gov",
 		DisplayName: "Profile Name", Role: role, Active: true,
 	}
-	if err := s.UpsertUserProfile(profile, department); err != nil {
+	if err := s.UpsertUserProfileAudited(profile, department, store.AuditActor{ID: "test", Role: "SYSTEM"}); err != nil {
 		t.Fatal(err)
 	}
 	registry := &apiRegistry{records: map[[32]byte]chain.Record{}, current: map[string][32]byte{}}

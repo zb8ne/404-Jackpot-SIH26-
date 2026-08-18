@@ -61,16 +61,21 @@ func newHandler(c registry, s *store.Store, verifier auth.TokenVerifier, contrac
 	protected := func(permission rbac.Permission, handler http.HandlerFunc) http.Handler {
 		return authenticated(rbac.Require(permission)(handler))
 	}
+	audited := func(permission rbac.Permission, action string, handler http.HandlerFunc) http.Handler {
+		return authenticated(srv.audit(action, rbac.Require(permission)(handler)))
+	}
 
 	mux.Handle("GET /me", authenticated(http.HandlerFunc(srv.me)))
 	mux.Handle("GET /citizens", protected(rbac.PermissionViewDept, srv.citizens))
-	mux.Handle("POST /issue", protected(rbac.PermissionIssue, srv.issue))
-	mux.Handle("POST /verify", protected(rbac.PermissionVerify, srv.verify))
-	mux.Handle("GET /verify/{docId}", protected(rbac.PermissionVerify, srv.verifyByID))
-	mux.Handle("POST /revoke", protected(rbac.PermissionRevoke, srv.revoke))
-	mux.Handle("POST /supersede", protected(rbac.PermissionSupersede, srv.supersede))
+	mux.Handle("POST /issue", audited(rbac.PermissionIssue, actionIssue, srv.issue))
+	mux.Handle("POST /verify", audited(rbac.PermissionVerify, actionVerifyFile, srv.verify))
+	mux.Handle("GET /verify/{docId}", audited(rbac.PermissionVerify, actionVerifyID, srv.verifyByID))
+	mux.Handle("POST /revoke", audited(rbac.PermissionRevoke, actionRevoke, srv.revoke))
+	mux.Handle("POST /supersede", audited(rbac.PermissionSupersede, actionSupersede, srv.supersede))
 	mux.Handle("GET /credentials/{citizen}", protected(rbac.PermissionViewDept, srv.credentials))
 	mux.Handle("GET /documents/{hash}/download", protected(rbac.PermissionViewDept, srv.download))
+	mux.Handle("GET /audit-events", authenticated(http.HandlerFunc(srv.auditEventsAccess)))
+	mux.Handle("GET /monitoring/overview", protected(rbac.PermissionMonitorAll, srv.monitoringOverview))
 
 	// TEMPORARY: test Supabase JWT authentication.
 	mux.Handle("GET /auth-test", auth.Middleware(verifier)(
@@ -180,10 +185,11 @@ func (s *Server) citizens(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, names)
 }
 
-// issue takes a multipart upload: file, dept, doc_id, doc_type, citizen.
-// The dept field is the hardcoded department picker — there is no auth.
+// issue takes a multipart upload: file, dept, doc_id, doc_type, citizen. The
+// compatibility dept field must match the backend-owned authenticated profile.
 func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
-	pdf, filename, err := readUpload(r)
+	audit := operationFromContext(r.Context())
+	pdf, filename, err := readUpload(w, r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -211,6 +217,7 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 
 	docID := strings.TrimSpace(r.FormValue("doc_id"))
 	citizen := strings.TrimSpace(r.FormValue("citizen"))
+	audit.DocID, audit.Citizen = docID, citizen
 	if docID == "" || citizen == "" {
 		writeErr(w, http.StatusBadRequest, "doc_id and citizen are required")
 		return
@@ -229,23 +236,28 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 	stamped, marked := pdfdoc.Stamp(pdf, docID)
 	sum := sha256.Sum256(stamped)
 	docHash := "0x" + hex.EncodeToString(sum[:])
+	audit.DocHash = docHash
 
 	// The contract is the authority on whether this department may issue this
 	// document type. If the roles disagree, this call reverts and we surface it.
 	txHash, err := s.chain.Issue(r.Context(), dept, sum, docID, docType)
 	if err != nil {
+		audit.Outcome = "FAILURE"
 		writeErr(w, http.StatusForbidden, err.Error())
 		return
 	}
+	audit.Transaction = txHash
 
 	doc := store.Document{
 		DocHash: docHash, DocID: docID, DocType: docTypeName, Citizen: citizen,
 		Issuer: dept.Address, Filename: filename, TxHash: txHash,
 	}
 	if err := s.store.Save(doc, stamped); err != nil {
+		audit.Outcome = "PARTIAL_FAILURE"
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("anchored on chain (%s) but the off-chain save failed: %v", txHash, err))
 		return
 	}
+	audit.Result = "VALID"
 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"docHash":     docHash,
@@ -267,7 +279,8 @@ const zeroHash = "0x" + "0000000000000000000000000000000000000000000000000000000
 // hands both to resolve. Having the id as well as the hash is what separates a
 // document that was altered from one that was never issued at all.
 func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
-	pdf, filename, err := readUpload(r)
+	audit := operationFromContext(r.Context())
+	pdf, filename, err := readUpload(w, r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -275,6 +288,7 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 
 	sum := sha256.Sum256(pdf)
 	computed := "0x" + hex.EncodeToString(sum[:])
+	audit.DocHash = computed
 
 	resp := map[string]any{
 		"filename":     filename,
@@ -287,6 +301,7 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 	// record — so resolve() gets a chance either way.
 	if id, ok := docid.Extract(pdf); ok {
 		resp["docId"] = id
+		audit.DocID = id
 	}
 
 	if err := s.resolve(r.Context(), resp["docId"].(string), computed, resp); err != nil {
@@ -295,6 +310,15 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 	}
 	if !authorizeVerificationResponse(w, r, resp) {
 		return
+	}
+	audit.Result, _ = resp["status"].(string)
+	audit.DocID, _ = resp["docId"].(string)
+	if citizen, ok := resp["citizen"].(string); ok {
+		audit.Citizen = citizen
+	}
+	audit.Details["expectedHash"] = resp["expectedHash"]
+	if resolved, ok := resp["resolvedDocId"]; ok {
+		audit.Details["resolvedDocId"] = resolved
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -305,6 +329,8 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 // currently says about the document.
 func (s *Server) verifyByID(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("docId")
+	audit := operationFromContext(r.Context())
+	audit.DocID = id
 
 	resp := map[string]any{
 		"docId":        id,
@@ -316,6 +342,16 @@ func (s *Server) verifyByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if !authorizeVerificationResponse(w, r, resp) {
 		return
+	}
+	audit.Result, _ = resp["status"].(string)
+	if expected, ok := resp["expectedHash"].(string); ok && expected != zeroHash {
+		audit.DocHash = expected
+	}
+	if citizen, ok := resp["citizen"].(string); ok {
+		audit.Citizen = citizen
+	}
+	if resolved, ok := resp["resolvedDocId"]; ok {
+		audit.Details["resolvedDocId"] = resolved
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -447,6 +483,7 @@ func (s *Server) status(ctx context.Context, rec chain.Record, resp map[string]a
 }
 
 func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
+	audit := operationFromContext(r.Context())
 	var body struct {
 		DocHash string `json:"docHash"`
 		Dept    string `json:"dept"`
@@ -455,6 +492,7 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "expected a JSON body with docHash and dept")
 		return
 	}
+	audit.DocHash = body.DocHash
 
 	dept, _, ok := requestDepartment(w, r)
 	if !ok {
@@ -478,6 +516,10 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "no such credential")
 		return
 	}
+	audit.DocID = record.DocID
+	if document, found, _ := s.store.ByHash(body.DocHash); found {
+		audit.Citizen = document.Citizen
+	}
 	if record.DocType != dept.DocType {
 		writeErr(w, http.StatusForbidden, "credential is outside the authenticated department")
 		return
@@ -485,9 +527,12 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 
 	txHash, err := s.chain.Revoke(r.Context(), dept, hash, dept.DocType)
 	if err != nil {
+		audit.Outcome = "FAILURE"
 		writeErr(w, http.StatusForbidden, err.Error())
 		return
 	}
+	audit.Transaction = txHash
+	audit.Result = "REVOKED"
 	writeJSON(w, http.StatusOK, map[string]any{"docHash": body.DocHash, "txHash": txHash, "status": "REVOKED"})
 }
 
@@ -495,7 +540,8 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 // new PDF plus old_hash, dept, doc_id and citizen. The old record stays on chain
 // as SUPERSEDED — corrections add history rather than erasing it.
 func (s *Server) supersede(w http.ResponseWriter, r *http.Request) {
-	pdf, filename, err := readUpload(r)
+	audit := operationFromContext(r.Context())
+	pdf, filename, err := readUpload(w, r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -511,6 +557,7 @@ func (s *Server) supersede(w http.ResponseWriter, r *http.Request) {
 	}
 
 	oldHash, err := parseHash(r.FormValue("old_hash"))
+	audit.ReferenceHash = r.FormValue("old_hash")
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -531,6 +578,7 @@ func (s *Server) supersede(w http.ResponseWriter, r *http.Request) {
 
 	docID := strings.TrimSpace(r.FormValue("doc_id"))
 	citizen := strings.TrimSpace(r.FormValue("citizen"))
+	audit.DocID, audit.Citizen = docID, citizen
 	if docID == "" || citizen == "" {
 		writeErr(w, http.StatusBadRequest, "doc_id and citizen are required")
 		return
@@ -539,21 +587,26 @@ func (s *Server) supersede(w http.ResponseWriter, r *http.Request) {
 	stamped, marked := pdfdoc.Stamp(pdf, docID)
 	sum := sha256.Sum256(stamped)
 	newHash := "0x" + hex.EncodeToString(sum[:])
+	audit.DocHash = newHash
 
 	txHash, err := s.chain.Supersede(r.Context(), dept, oldHash, sum, docID, dept.DocType)
 	if err != nil {
+		audit.Outcome = "FAILURE"
 		writeErr(w, http.StatusForbidden, err.Error())
 		return
 	}
+	audit.Transaction = txHash
 
 	doc := store.Document{
 		DocHash: newHash, DocID: docID, DocType: chain.DocTypeName(dept.DocType),
 		Citizen: citizen, Issuer: dept.Address, Filename: filename, TxHash: txHash,
 	}
 	if err := s.store.Save(doc, stamped); err != nil {
+		audit.Outcome = "PARTIAL_FAILURE"
 		writeErr(w, http.StatusInternalServerError, fmt.Sprintf("anchored on chain (%s) but the off-chain save failed: %v", txHash, err))
 		return
 	}
+	audit.Result = "VALID"
 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"docHash":     newHash,
@@ -660,7 +713,10 @@ func parseHash(s string) ([32]byte, error) {
 	return h, nil
 }
 
-func readUpload(r *http.Request) ([]byte, string, error) {
+func readUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, error) {
+	// Allow bounded multipart framing in addition to the file itself, then enforce
+	// the exact file limit below by reading one byte past it.
+	r.Body = http.MaxBytesReader(w, r.Body, maxUpload+(1<<20))
 	if err := r.ParseMultipartForm(maxUpload); err != nil {
 		return nil, "", fmt.Errorf("expected a multipart form upload: %w", err)
 	}
@@ -670,12 +726,15 @@ func readUpload(r *http.Request) ([]byte, string, error) {
 	}
 	defer f.Close()
 
-	pdf, err := io.ReadAll(io.LimitReader(f, maxUpload))
+	pdf, err := io.ReadAll(io.LimitReader(f, maxUpload+1))
 	if err != nil {
 		return nil, "", err
 	}
 	if len(pdf) == 0 {
 		return nil, "", fmt.Errorf("uploaded file is empty")
+	}
+	if len(pdf) > maxUpload {
+		return nil, "", fmt.Errorf("uploaded file exceeds the 20 MiB limit")
 	}
 	return pdf, header.Filename, nil
 }

@@ -18,6 +18,9 @@ func main() {
 	role := flag.String("role", "", "CONTROLLER, ADMIN, or OFFICIAL")
 	department := flag.String("department", "", "stable department ID; empty for CONTROLLER")
 	inactive := flag.Bool("inactive", false, "create or update the profile as inactive")
+	operatorID := flag.String("operator-id", "SYSTEM", "accountable operator ID, or SYSTEM for automated demo provisioning")
+	operatorEmail := flag.String("operator-email", "", "operator email for the authorization audit")
+	operatorName := flag.String("operator-name", "Profile Seeder", "operator display name for the authorization audit")
 	flag.Parse()
 
 	profile := store.UserProfile{
@@ -36,7 +39,14 @@ func main() {
 		log.Fatal(err)
 	}
 	defer st.Close()
-	if err := st.UpsertUserProfile(profile, strings.TrimSpace(*department)); err != nil {
+	actor := store.AuditActor{
+		ID: strings.TrimSpace(*operatorID), Email: strings.TrimSpace(*operatorEmail),
+		Name: strings.TrimSpace(*operatorName), Role: "SYSTEM",
+	}
+	if actor.ID == "" {
+		log.Fatal("-operator-id is required (use SYSTEM only for automated demo provisioning)")
+	}
+	if err := st.UpsertUserProfileAudited(profile, strings.TrimSpace(*department), actor); err != nil {
 		log.Fatalf("save profile: %v", err)
 	}
 	log.Printf("saved %s profile for %s", profile.Role, profile.SupabaseUserID)

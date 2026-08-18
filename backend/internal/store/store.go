@@ -3,6 +3,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -77,6 +78,39 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   )
 );
 CREATE INDEX IF NOT EXISTS idx_user_profiles_department ON user_profiles(department_id);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id          TEXT NOT NULL UNIQUE,
+  created_at        TEXT NOT NULL,
+  actor_user_id     TEXT NOT NULL,
+  actor_email       TEXT NOT NULL DEFAULT '',
+  actor_name        TEXT NOT NULL DEFAULT '',
+  actor_role        TEXT NOT NULL,
+  department_id     TEXT,
+  department_name   TEXT,
+  action            TEXT NOT NULL,
+  outcome           TEXT NOT NULL CHECK (outcome IN ('SUCCESS', 'FAILURE', 'DENIED', 'PARTIAL_FAILURE')),
+  result            TEXT NOT NULL DEFAULT '',
+  document_id       TEXT,
+  document_hash     TEXT,
+  citizen           TEXT,
+  transaction_hash  TEXT,
+  reference_hash    TEXT,
+  request_id        TEXT NOT NULL,
+  http_status       INTEGER NOT NULL,
+  error_message     TEXT,
+  details_json      TEXT NOT NULL DEFAULT '{}',
+  previous_hash     TEXT NOT NULL,
+  entry_hash        TEXT NOT NULL UNIQUE
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(id DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_department_created ON audit_logs(department_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action_created ON audit_logs(action, id DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_outcome_created ON audit_logs(outcome, id DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_document_id ON audit_logs(document_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_document_hash ON audit_logs(document_hash);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_created ON audit_logs(actor_user_id, id DESC);
 `
 
 var defaultDepartments = []Department{
@@ -259,11 +293,19 @@ func (s *Store) DepartmentByID(id string) (Department, error) {
 }
 
 func (s *Store) UserProfileByID(id string) (UserProfile, error) {
+	return userProfileByID(context.Background(), s.db, id)
+}
+
+type profileQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func userProfileByID(ctx context.Context, queryer profileQueryer, id string) (UserProfile, error) {
 	var p UserProfile
 	var departmentID, departmentName sql.NullString
 	var departmentDocType sql.NullInt64
 	var departmentActive sql.NullBool
-	err := s.db.QueryRow(`
+	err := queryer.QueryRowContext(ctx, `
 		SELECT p.supabase_user_id, p.email, p.display_name, p.role, p.active,
 		       d.id, d.display_name, d.doc_type, d.active
 		FROM user_profiles p
@@ -290,12 +332,12 @@ func (s *Store) UserProfileByID(id string) (UserProfile, error) {
 	return p, nil
 }
 
-func (s *Store) UpsertUserProfile(p UserProfile, departmentID string) error {
+func upsertUserProfile(ctx context.Context, conn auditConnection, p UserProfile, departmentID string) error {
 	var department any
 	if departmentID != "" {
 		department = departmentID
 	}
-	_, err := s.db.Exec(`
+	_, err := conn.ExecContext(ctx, `
 		INSERT INTO user_profiles
 		  (supabase_user_id, email, display_name, role, department_id, active)
 		VALUES (?, ?, ?, ?, ?, ?)
@@ -308,4 +350,72 @@ func (s *Store) UpsertUserProfile(p UserProfile, departmentID string) error {
 		p.SupabaseUserID, p.Email, p.DisplayName, p.Role, department, p.Active,
 	)
 	return err
+}
+
+// UpsertUserProfileAudited is the supported administrative write path. The
+// audit event snapshots both sides of the authorization change so a role,
+// department, or active-state edit cannot be silent at the application layer.
+func (s *Store) UpsertUserProfileAudited(p UserProfile, departmentID string, actor AuditActor) error {
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(ctx, `ROLLBACK`)
+		}
+	}()
+
+	before, beforeErr := userProfileByID(ctx, conn, p.SupabaseUserID)
+	if beforeErr != nil && beforeErr != ErrNotFound {
+		return beforeErr
+	}
+	if err := upsertUserProfile(ctx, conn, p, departmentID); err != nil {
+		return err
+	}
+	after := p
+	if departmentID != "" {
+		after.Department = &Department{ID: departmentID}
+	}
+	action := "USER_PROFILE_UPDATE"
+	if beforeErr == ErrNotFound {
+		action = "USER_PROFILE_CREATE"
+	}
+	details := map[string]any{
+		"targetUserId": p.SupabaseUserID,
+		"before":       profileAuditValue(before, beforeErr == nil),
+		"after":        profileAuditValue(after, true),
+		"departmentId": departmentID,
+	}
+	if _, err := appendAuditEvent(ctx, conn, AuditEvent{
+		Actor: actor, Action: action, Outcome: "SUCCESS", Result: p.Role,
+		RequestID: randomID(), HTTPStatus: 0, Details: details,
+	}); err != nil {
+		return fmt.Errorf("authorization audit failed; profile change rolled back: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func profileAuditValue(p UserProfile, present bool) any {
+	if !present {
+		return nil
+	}
+	departmentID := ""
+	if p.Department != nil {
+		departmentID = p.Department.ID
+	}
+	return map[string]any{
+		"email": p.Email, "name": p.DisplayName, "role": p.Role,
+		"departmentId": departmentID, "active": p.Active,
+	}
 }

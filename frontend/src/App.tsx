@@ -4,12 +4,19 @@ import { Citizen } from './screens/Citizen'
 import { Issue } from './screens/Issue'
 import { Verify } from './screens/Verify'
 import { Login } from './screens/Login'
+import { AuditEvents } from './screens/AuditEvents'
+import { Monitoring } from './screens/Monitoring'
+import { Revoke, Supersede } from './screens/Lifecycle'
 import { supabase } from './lib/supabase'
 
 const TABS = [
   { id: 'verify', label: 'Verify', hint: 'check a document' },
   { id: 'issue', label: 'Issue', hint: 'anchor a new one' },
+  { id: 'revoke', label: 'Revoke', hint: 'Admin lifecycle action' },
+  { id: 'supersede', label: 'Supersede', hint: 'Admin replacement' },
   { id: 'citizen', label: 'Citizen', hint: 'what someone holds' },
+  { id: 'audit', label: 'Audit', hint: 'Phase 2 activity' },
+  { id: 'monitoring', label: 'Monitoring', hint: 'system statistics' },
 ] as const
 
 type Tab = (typeof TABS)[number]['id']
@@ -59,6 +66,11 @@ export default function App() {
       })
   }, [session])
 
+  useEffect(() => {
+    if (!profile) return
+    setTab(profile.role === 'CONTROLLER' ? 'monitoring' : 'verify')
+  }, [profile])
+
   if (!session) {
     return <Login />
   }
@@ -99,8 +111,13 @@ export default function App() {
             >
               Sign out
             </button>
-            {profile?.role !== 'CONTROLLER' && <nav className="flex gap-2">
-              {TABS.map((t) => (
+            <nav className="flex flex-wrap gap-2">
+              {TABS.filter((candidate) => {
+                if (!profile) return false
+                if (profile.role === 'CONTROLLER') return candidate.id === 'monitoring' || candidate.id === 'audit'
+                if (profile.role === 'ADMIN') return candidate.id !== 'monitoring'
+                return candidate.id === 'verify' || candidate.id === 'issue' || candidate.id === 'citizen'
+              }).map((t) => (
                 <button
                   key={t.id}
                   onClick={() => setTab(t.id)}
@@ -114,7 +131,7 @@ export default function App() {
                   <div className="text-xs opacity-70">{t.hint}</div>
                 </button>
               ))}
-            </nav>}
+            </nav>
           </div>
         </div>
       </header>
@@ -125,15 +142,15 @@ export default function App() {
             {profileError}
           </div>
         )}
-        {profile?.role === 'CONTROLLER' ? (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-8 text-slate-300">
-            Controller monitoring will be added in the audit phase. This role cannot perform credential operations.
-          </div>
-        ) : profile ? (
+        {profile ? (
           <>
             {tab === 'verify' && <Verify />}
             {tab === 'issue' && <Issue />}
+            {tab === 'revoke' && profile.role === 'ADMIN' && <Revoke />}
+            {tab === 'supersede' && profile.role === 'ADMIN' && <Supersede />}
             {tab === 'citizen' && <Citizen />}
+            {tab === 'audit' && profile.role !== 'OFFICIAL' && <AuditEvents />}
+            {tab === 'monitoring' && profile.role === 'CONTROLLER' && <Monitoring />}
           </>
         ) : !profileError ? (
           <p className="text-slate-400">Loading application profile…</p>
