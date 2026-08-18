@@ -9,6 +9,11 @@ and Solidity owns department-wallet credential authority and lifecycle state. Ph
 adds hash-chained audit history, department-scoped Admin audit access, and system-wide
 Controller monitoring. The full API contract is in [`docs/API.md`](docs/API.md).
 
+Phase 3 adds citizen accounts and consent-gated QR verification. Newly issued PDFs
+open `/verify?docId=...`; an authenticated government user creates a request, and
+the citizen approves or denies through a random one-time email link before the
+backend reveals the current chain-backed verdict.
+
 ## Run it
 
 The backend requires `SUPABASE_URL`. The frontend requires
@@ -31,6 +36,20 @@ ADMIN access tokens through `SEED_BIRTH_TOKEN`, `SEED_TRANSPORT_TOKEN`, and
 `SEED_BIRTH_USER_ID`, `SEED_TRANSPORT_USER_ID`, and `SEED_EDUCATION_USER_ID`;
 the Makefile provisions those backend profiles before seeding. It does not
 contain an authentication bypass.
+
+The backend uses `PUBLIC_WEB_URL` (default `http://127.0.0.1:5173`) as the
+explicit base URL embedded in new QR codes. Citizen accounts require an email;
+phone is optional and is not used for consent. Accounts are provisioned through
+controlled tooling:
+
+```sh
+cd backend
+go run ./cmd/citizen-seed -db credentials.db -id citizen-asha \
+  -name 'Asha Menon' -email asha@example.test
+```
+
+Use `-link-doc-id` only when explicitly linking an older stored credential.
+Ownership is never inferred from a name or email address.
 
 ```sh
 make demo
@@ -86,14 +105,15 @@ BC-2019-004471     birth_certificate -> SUPERSEDED
 BC-2019-004471-R1  birth_certificate -> VALID
 ```
 
-Verifying the untouched v1 returns `SUPERSEDED` along with a `supersededBy` pointer to the
-version that replaced it, so a verifier holding an out-of-date copy is sent to the live one
-rather than told it is fake. Scanning v1's QR resolves the same way.
+Verifying the untouched v1 PDF returns `SUPERSEDED` along with a `supersededBy` pointer to
+the version that replaced it. QR verification of linked credentials is consent-gated and
+returns the current lifecycle verdict only after the citizen approves the request.
 
 ### Issuing stamps the document
 
 `POST /issue` does not anchor the file it was handed. It stamps the upload with a registry
-page — a QR code encoding the docId, and the marker `CREDREG-DOCID:<docId>` — and only then
+page — a QR code encoding the configured `/verify?docId=...` URL, and the marker
+`CREDREG-DOCID:<docId>` — and only then
 hashes it:
 
 ```
@@ -159,8 +179,8 @@ frontend/    React + TypeScript + Tailwind (Vite)
 
 ### Frontend
 
-The application uses tab navigation rather than a router; the QR encodes a bare docId,
-not a URL.
+The application uses tab navigation plus minimal pathname/query handling. New QR codes
+encode a verification URL; existing bare-document-ID QR payloads remain compatible.
 
 - **Verify** — drag-drop or pick a PDF. One large colour-coded verdict panel. A tampered
   document shows the expected and computed hashes stacked, with every differing character
@@ -173,6 +193,11 @@ not a URL.
 - **Monitoring** and **Audit Events** — minimal temporary Phase 2 validation screens for
   Controller system-wide monitoring and Controller/Admin audit access.
 - **Revoke** and **Supersede** — minimal temporary Admin lifecycle validation forms.
+- **QR verification request** — `/verify?docId=...` requires government login,
+  captures a purpose, sends a development consent notification, and reveals the
+  blockchain verdict only after approval.
+- **Citizen consent** — `/consent/{token}` is a public one-time approve/deny page;
+  citizens do not need a Supabase account for the prototype.
 
 The Phase 2 screens are intentionally replaceable validation UI, not the frontend team's
 final dashboard. Backend RBAC remains authoritative: Controllers receive Monitoring and
@@ -203,11 +228,11 @@ is maintained in [`docs/API.md`](docs/API.md).
 
 | Method | Path | |
 | --- | --- | --- |
-| POST | `/issue` | multipart: `file`, `dept`, `doc_type`, `doc_id`, `citizen`; stamps, then anchors |
+| POST | `/issue` | multipart: `file`, `dept`, `doc_type`, `doc_id`, `citizen_account_id`; stamps, then anchors |
 | POST | `/verify` | multipart: `file` → `VALID` / `SUPERSEDED` / `REVOKED` / `TAMPERED` / `NOT_ISSUED` |
-| GET | `/verify/{docId}` | same shape minus `computedHash` — the QR-scan path |
+| GET | `/verify/{docId}` | legacy ID lookup; linked credentials require the consent-request flow |
 | POST | `/revoke` | json: `docHash`, `dept` |
-| POST | `/supersede` | multipart: `file`, `dept`, `doc_id`, `citizen`, `old_hash` |
+| POST | `/supersede` | multipart replacement; inherits citizen linkage or accepts `citizen_account_id` for legacy records |
 | GET | `/credentials/{citizen}` | documents with live on-chain status |
 | GET | `/departments`, `/citizens`, `/health` | |
 | GET | `/documents/{hash}/download` | the stored PDF |
@@ -215,6 +240,10 @@ is maintained in [`docs/API.md`](docs/API.md).
 | GET | `/auth-test` | temporary authentication diagnostic |
 | GET | `/audit-events` | Controller system-wide or Admin department-scoped audit history |
 | GET | `/monitoring/overview` | Controller-only system monitoring summary |
+| GET | `/citizen-accounts` | masked citizen-account choices for issuance |
+| GET, POST | `/verification-requests...` | scoped request status, creation, and completion |
+| GET, POST | `/consent/{token}...` | minimal one-time citizen consent flow |
+| GET | `/development/notifications/{id}` | authenticated in-memory demo email capture |
 
 ## Demo-grade shortcuts
 
@@ -227,4 +256,7 @@ is maintained in [`docs/API.md`](docs/API.md).
 - Audit rows are hash-chained and integrity-checkable, but SQLite has no external checkpoint;
   a database administrator could replace or recompute the complete database history.
 - Monitoring and audit data cover retained Phase 2 audit events, not older operations.
+- The prototype email notifier keeps raw consent URLs only in backend process memory;
+  links disappear on restart and no real email is delivered.
+- Consent tokens expire after 15 minutes. SQLite stores only their SHA-256 hashes.
 - Local Anvil only, no testnet, no internet.

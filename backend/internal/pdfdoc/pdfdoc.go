@@ -81,7 +81,14 @@ var (
 // falls back to appending the marker as a trailing comment: still verifiable,
 // but with no page to look at.
 func Stamp(orig []byte, docID string) (stamped []byte, visible bool) {
-	out, err := appendRegistryPage(orig, docID)
+	return StampWithQR(orig, docID, docID)
+}
+
+// StampWithQR preserves the embedded document marker while allowing newly
+// issued credentials to carry an explicit verification URL in their QR code.
+// Stamp remains the compatibility path for older bare-document-ID QR values.
+func StampWithQR(orig []byte, docID, qrPayload string) (stamped []byte, visible bool) {
+	out, err := appendRegistryPage(orig, docID, qrPayload)
 	if err != nil {
 		return appendMarkerComment(orig, docID), false
 	}
@@ -99,7 +106,7 @@ func appendMarkerComment(orig []byte, docID string) []byte {
 	return append(out, []byte("%"+docid.Marker+docID+"\n")...)
 }
 
-func appendRegistryPage(orig []byte, docID string) ([]byte, error) {
+func appendRegistryPage(orig []byte, docID, qrPayload string) ([]byte, error) {
 	// Where the current cross-reference table starts; the new one chains to it.
 	sx := reStartXref.FindAllSubmatch(orig, -1)
 	if len(sx) == 0 {
@@ -164,7 +171,7 @@ func appendRegistryPage(orig []byte, docID string) ([]byte, error) {
 	updatedPages = updatedPages[:count[2]+shift] +
 		strconv.Itoa(oldCount+1) + updatedPages[count[3]+shift:]
 
-	stream := registryPageContent(docID)
+	stream := registryPageContent(docID, qrPayload)
 
 	var out bytes.Buffer
 	out.Write(orig)
@@ -226,7 +233,7 @@ func findObject(raw []byte, num string) (string, error) {
 	return strings.TrimSpace(string(m[1])), nil
 }
 
-func registryPageContent(docID string) string {
+func registryPageContent(docID, qrPayload string) string {
 	var b strings.Builder
 
 	b.WriteString("BT\n/F1 16 Tf\n72 720 Td\n(CREDENTIAL REGISTRY ANCHOR) Tj\nET\n")
@@ -237,7 +244,7 @@ func registryPageContent(docID string) string {
 	fmt.Fprintf(&b, "(%s) Tj\nET\n",
 		escape("Scan the code, or upload this file, to check that it is authentic and current."))
 
-	b.WriteString(renderQR(docID, 72, 480, 180))
+	b.WriteString(renderQR(qrPayload, 72, 480, 180))
 
 	b.WriteString("BT\n/F1 11 Tf\n72 458 Td\n")
 	fmt.Fprintf(&b, "(%s%s) Tj\nET\n", docid.Marker, escape(docID))

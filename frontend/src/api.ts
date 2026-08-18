@@ -67,6 +67,42 @@ export type IssueResult = {
   issuer: string
   downloadUrl: string
   stamped: boolean
+  citizenAccountId: string
+}
+
+export type CitizenAccountOption = { id: string; displayName: string; email: string }
+export type VerificationRequestState = 'PENDING' | 'APPROVED' | 'DENIED' | 'EXPIRED' | 'COMPLETED'
+export type VerificationRequest = {
+  id: string
+  documentId: string
+  requesterUserId: string
+  requesterEmail: string
+  requesterName: string
+  requesterRole: string
+  departmentId: string
+  departmentName: string
+  documentType: string
+  state: VerificationRequestState
+  purpose: string
+  createdAt: string
+  expiresAt: string
+  decisionAt: string | null
+  completedAt: string | null
+  decisionChannel: string | null
+  decisionReference: string | null
+  completedResult: VerifyResult | null
+  version: number
+  notificationStatus: string
+  notificationDestination: string
+}
+export type ConsentDetails = {
+  requestId: string
+  state: VerificationRequestState
+  requester: { name: string; role: string }
+  department: { id: string; name: string }
+  documentType: string
+  purpose: string
+  expiresAt: string
 }
 
 export type RevokeResult = {
@@ -94,6 +130,13 @@ export type AuditAction =
   | 'SUPERSEDE'
   | 'USER_PROFILE_CREATE'
   | 'USER_PROFILE_UPDATE'
+  | 'VERIFICATION_REQUEST_CREATED'
+  | 'CONSENT_NOTIFICATION'
+  | 'CONSENT_APPROVED'
+  | 'CONSENT_DENIED'
+  | 'VERIFICATION_REQUEST_EXPIRED'
+  | 'VERIFICATION_REQUEST_COMPLETED'
+  | 'CONSENT_TOKEN_REJECTED'
 
 export type AuditEvent = {
   id: number
@@ -186,6 +229,7 @@ export const getHealth = () => request<{ ok: boolean; contract: string }>('/heal
 export const getDepartments = () => request<Department[]>('/departments', {}, false)
 export const getMe = () => request<ApplicationUser>('/me')
 export const getCitizens = () => request<string[]>('/citizens')
+export const getCitizenAccounts = () => request<CitizenAccountOption[]>('/citizen-accounts')
 
 export const getAuditEvents = (query: {
   limit?: number
@@ -229,6 +273,7 @@ export const issueDocument = (fields: {
   docType: string
   docId: string
   citizen: string
+  citizenAccountId: string
 }) => {
   const form = new FormData()
   form.append('file', fields.file)
@@ -236,8 +281,21 @@ export const issueDocument = (fields: {
   form.append('doc_type', fields.docType)
   form.append('doc_id', fields.docId)
   form.append('citizen', fields.citizen)
+  form.append('citizen_account_id', fields.citizenAccountId)
   return request<IssueResult>('/issue', { method: 'POST', body: form })
 }
+
+export const createVerificationRequest = (documentId: string, purpose: string) =>
+  request<{ id: string; state: VerificationRequestState; expiresAt: string; notification: { channel: string; destination: string; status: string } }>('/verification-requests', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ documentId, purpose }),
+  })
+
+export const getVerificationRequest = (id: string) => request<VerificationRequest>(`/verification-requests/${encodeURIComponent(id)}`)
+export const listVerificationRequests = (state?: VerificationRequestState) => request<{ requests: VerificationRequest[]; page: { limit: number; offset: number; hasMore: boolean } }>(`/verification-requests${state ? `?state=${state}` : ''}`)
+export const completeVerificationRequest = (id: string) => request<{ request: VerificationRequest; verification: VerifyResult }>(`/verification-requests/${encodeURIComponent(id)}/complete`, { method: 'POST' })
+export const getDevelopmentConsentURL = (id: string) => request<{ requestId: string; consentUrl: string; developmentOnly: boolean }>(`/development/notifications/${encodeURIComponent(id)}`)
+export const getConsentDetails = (token: string) => request<ConsentDetails>(`/consent/${encodeURIComponent(token)}`, {}, false)
+export const decideConsent = (token: string, decision: 'approve' | 'deny') => request<{ id: string; state: VerificationRequestState; decisionAt: string }>(`/consent/${encodeURIComponent(token)}/${decision}`, { method: 'POST' }, false)
 
 export const revokeDocument = (docHash: string, dept: string) =>
   request<RevokeResult>('/revoke', {
@@ -252,6 +310,7 @@ export const supersedeDocument = (fields: {
   oldHash: string
   docId: string
   citizen: string
+  citizenAccountId: string
 }) => {
   const form = new FormData()
   form.append('file', fields.file)
@@ -259,6 +318,7 @@ export const supersedeDocument = (fields: {
   form.append('old_hash', fields.oldHash)
   form.append('doc_id', fields.docId)
   form.append('citizen', fields.citizen)
+  form.append('citizen_account_id', fields.citizenAccountId)
   return request<SupersedeResult>('/supersede', { method: 'POST', body: form })
 }
 

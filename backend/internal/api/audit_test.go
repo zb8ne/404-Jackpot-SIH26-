@@ -30,6 +30,9 @@ func auditFixture(t *testing.T, role, department string) (http.Handler, *store.S
 	if err := s.UpsertUserProfileAudited(profile, department, store.AuditActor{ID: "test", Role: "SYSTEM"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.UpsertCitizenAccount(store.CitizenAccount{ID: "citizen-1", DisplayName: "Citizen", Email: "citizen@example.test", Active: true}); err != nil {
+		t.Fatal(err)
+	}
 	registry := &apiRegistry{records: map[[32]byte]chain.Record{}, current: map[string][32]byte{}}
 	handler := newHandler(registry, s, apiVerifier{user: &auth.User{ID: "audit-user"}}, "0xcontract")
 	return handler, s, registry
@@ -114,7 +117,7 @@ func TestSuccessfulSupersedeCreatesAuditEvent(t *testing.T) {
 	_, _ = part.Write([]byte("%PDF-1.4\nreplacement"))
 	for key, value := range map[string]string{
 		"dept": "birth", "old_hash": "0x" + strings.Repeat("0", 62) + "08",
-		"doc_id": "BC-NEW", "citizen": "Citizen",
+		"doc_id": "BC-NEW", "citizen": "Citizen", "citizen_account_id": "citizen-1",
 	} {
 		_ = writer.WriteField(key, value)
 	}

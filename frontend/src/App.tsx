@@ -7,6 +7,8 @@ import { Login } from './screens/Login'
 import { AuditEvents } from './screens/AuditEvents'
 import { Monitoring } from './screens/Monitoring'
 import { Revoke, Supersede } from './screens/Lifecycle'
+import { Consent } from './screens/Consent'
+import { VerificationRequestFlow } from './screens/VerificationRequest'
 import { supabase } from './lib/supabase'
 
 const TABS = [
@@ -22,6 +24,9 @@ const TABS = [
 type Tab = (typeof TABS)[number]['id']
 
 export default function App() {
+	const consentMatch = window.location.pathname.match(/^\/consent\/([^/]+)$/)
+	const consentToken = consentMatch ? decodeURIComponent(consentMatch[1]) : ''
+	const qrDocumentId = window.location.pathname === '/verify' ? new URLSearchParams(window.location.search).get('docId') ?? '' : ''
   const [session, setSession] = useState<any>(null)
   const [tab, setTab] = useState<Tab>('verify')
   const [contract, setContract] = useState('')
@@ -70,6 +75,10 @@ export default function App() {
     if (!profile) return
     setTab(profile.role === 'CONTROLLER' ? 'monitoring' : 'verify')
   }, [profile])
+
+  if (consentToken) {
+    return <Consent token={consentToken} />
+  }
 
   if (!session) {
     return <Login />
@@ -144,7 +153,7 @@ export default function App() {
         )}
         {profile ? (
           <>
-            {tab === 'verify' && <Verify />}
+            {qrDocumentId && profile.role !== 'CONTROLLER' ? <VerificationRequestFlow documentId={qrDocumentId} /> : tab === 'verify' && <Verify />}
             {tab === 'issue' && <Issue />}
             {tab === 'revoke' && profile.role === 'ADMIN' && <Revoke />}
             {tab === 'supersede' && profile.role === 'ADMIN' && <Supersede />}

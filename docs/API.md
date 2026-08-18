@@ -1,6 +1,6 @@
 # Credential Registry API
 
-This document is the frontend/backend contract for the implemented API, including Phase 2 audit and monitoring. The default local base URL is `http://localhost:8088`.
+This document is the frontend/backend contract for the implemented API, including Phase 2 audit/monitoring and Phase 3 citizen-consent verification. The default local base URL is `http://localhost:8088`.
 
 ## Authentication, roles, and errors
 
@@ -139,6 +139,7 @@ Response `200`:
     "txHash":"0xtx...",
     "issuedAt":"2026-08-18 10:30:45",
     "sizeBytes":12345,
+    "citizenAccountId":"citizen-asha",
     "status":"VALID"
   }]
 }
@@ -185,7 +186,8 @@ Multipart form-data:
 - `dept`: compatibility field; if supplied, must equal the caller's department.
 - `doc_type`: required and must equal the department document type.
 - `doc_id`: required non-empty document ID.
-- `citizen`: required non-empty citizen name.
+- `citizen`: legacy compatibility field. The backend uses the selected citizen account's stored display name.
+- `citizen_account_id`: required stable ID of an active provisioned citizen account. The backend derives the stored citizen display name and email linkage from this record; it does not authorize ownership from the submitted `citizen` field.
 
 Response `201`:
 
@@ -197,19 +199,21 @@ Response `201`:
   "docType":"birth_certificate",
   "docId":"BC-2026-1234",
   "citizen":"Asha Menon",
+  "citizenAccountId":"citizen-asha",
   "downloadUrl":"/documents/0xabc.../download",
   "stamped":true
 }
 ```
 
-Errors: `400` malformed upload, file larger than 20 MiB, unknown document type, or missing fields; `401`; `403` role/department/contract rejection; `409` upload already contains a registry marker; `500` off-chain save/configuration failure.
+Errors: `400` malformed upload, file larger than 20 MiB, unknown document type, missing fields, or invalid/inactive citizen account; `401`; `403` role/department/contract rejection; `409` upload already contains a registry marker; `500` off-chain save/configuration failure.
 
 Example:
 
 ```sh
 curl -H 'Authorization: Bearer <token>' \
   -F file=@certificate.pdf -F dept=birth -F doc_type=birth_certificate \
-  -F doc_id=BC-2026-1234 -F 'citizen=Asha Menon' http://localhost:8088/issue
+  -F doc_id=BC-2026-1234 -F 'citizen=Asha Menon' -F citizen_account_id=citizen-asha \
+  http://localhost:8088/issue
 ```
 
 ### POST `/verify`
@@ -249,7 +253,7 @@ curl -H 'Authorization: Bearer <token>' -F file=@certificate.pdf http://localhos
 
 ### GET `/verify/{docId}`
 
-Purpose: resolve current credential state by document ID without uploaded bytes. Authentication: required. Roles: Admin or Official. Scope: caller department.
+Purpose: legacy direct lookup by document ID. Authentication: required. Roles: Admin or Official. Scope: caller department. For a credential linked to a citizen account, this endpoint returns `409` and requires the Phase 3 verification-request flow. Old unlinked credentials retain the Phase 1/2 response for compatibility. The QR frontend never calls this endpoint.
 
 Path parameter: URL-encoded `docId`.
 
@@ -270,7 +274,7 @@ Response `200` uses the `/verify` verdict fields but omits `filename` and `compu
 }
 ```
 
-Errors: `401`; `403` role or cross-department result; `500` configuration failure; `502` blockchain failure.
+Errors: `401`; `403` role or cross-department result; `409 {"error":"citizen consent is required; create a verification request"}` for linked credentials; `500` configuration failure; `502` blockchain failure.
 
 Example:
 
@@ -315,7 +319,8 @@ Multipart form-data:
 - `dept`: compatibility field; if supplied, must match caller department.
 - `old_hash`: required 32-byte hexadecimal credential hash.
 - `doc_id`: required replacement document ID.
-- `citizen`: required citizen name.
+- `citizen_account_id`: optional for a linked old credential because its citizen linkage is inherited. Required for a legacy unlinked old credential and must identify an active provisioned citizen account.
+- `citizen`: compatibility display field. The backend ignores it when linkage can be inherited or derived and stores the selected account's display name.
 
 Response `201`:
 
@@ -337,7 +342,7 @@ Example:
 
 ```sh
 curl -H 'Authorization: Bearer <token>' -F file=@replacement.pdf -F dept=birth \
-  -F old_hash=0xold... -F doc_id=BC-2026-1234-R1 -F 'citizen=Asha Menon' \
+  -F old_hash=0xold... -F doc_id=BC-2026-1234-R1 -F citizen_account_id=citizen-asha \
   http://localhost:8088/supersede
 ```
 
@@ -367,7 +372,7 @@ Nullable credential fields are always present as JSON `null`. `details` is an ob
 }
 ```
 
-Actions: `ISSUE`, `VERIFY_FILE`, `VERIFY_ID`, `REVOKE`, `SUPERSEDE`, `USER_PROFILE_CREATE`, `USER_PROFILE_UPDATE`.
+Actions: `ISSUE`, `VERIFY_FILE`, `VERIFY_ID`, `REVOKE`, `SUPERSEDE`, `USER_PROFILE_CREATE`, `USER_PROFILE_UPDATE`, `VERIFICATION_REQUEST_CREATED`, `CONSENT_NOTIFICATION`, `CONSENT_APPROVED`, `CONSENT_DENIED`, `VERIFICATION_REQUEST_EXPIRED`, `VERIFICATION_REQUEST_COMPLETED`, `CONSENT_TOKEN_REJECTED`.
 
 Outcomes: `SUCCESS`, `FAILURE`, `DENIED`, `PARTIAL_FAILURE`.
 
@@ -444,6 +449,191 @@ Example:
 ```sh
 curl -H 'Authorization: Bearer <controller-token>' http://localhost:8088/monitoring/overview
 ```
+
+## Phase 3 citizen consent
+
+Supabase authenticates government users only. Citizens approve or deny through a random, expiring, request-specific email token. SQLite stores only the SHA-256 token hash. Raw tokens and consent URLs are never written to SQLite, audit details, or logs.
+
+New credentials are stamped with `{PUBLIC_WEB_URL}/verify?docId={url-encoded-document-id}` before hashing and anchoring. Existing PDFs with bare-ID QR values remain valid and readable. The QR frontend creates a consent request and does not display a registry verdict before completion.
+
+Verification requests expire 15 minutes after creation. States are `PENDING`, `APPROVED`, `DENIED`, `EXPIRED`, and `COMPLETED`. An identical repeated approve/deny is idempotent; conflicting decisions and repeated completion return `409`. Expiry is enforced when requests or tokens are read or changed.
+
+### GET `/citizen-accounts`
+
+Purpose: list active provisioned citizen accounts for the Issue form. Authentication: required. Roles: Admin or Official. Scope: government issuance UI. Email is masked.
+
+Response `200`:
+
+```json
+[{"id":"citizen-asha","displayName":"Asha Menon","email":"a***@example.test"}]
+```
+
+Errors: `401`; `403`; `500 {"error":"could not load citizen accounts"}`.
+
+Example:
+
+```sh
+curl -H 'Authorization: Bearer <token>' http://localhost:8088/citizen-accounts
+```
+
+Citizen accounts are provisioned through controlled local tooling, not a public API:
+
+```sh
+cd backend
+go run ./cmd/citizen-seed -db credentials.db -id citizen-asha \
+  -name 'Asha Menon' -email asha@example.test
+```
+
+`-phone` and `-supabase-user-id` are optional. `-link-doc-id` explicitly links existing stored credentials; no name/email matching occurs.
+
+### Verification request object
+
+Government request APIs return:
+
+```json
+{
+  "id":"opaque-request-id",
+  "documentId":"BC-2026-1234",
+  "requesterUserId":"supabase-sub",
+  "requesterEmail":"official@example.gov",
+  "requesterName":"Birth Official",
+  "requesterRole":"OFFICIAL",
+  "departmentId":"birth",
+  "departmentName":"Birth Registration Dept",
+  "documentType":"birth_certificate",
+  "state":"PENDING",
+  "purpose":"Employment onboarding",
+  "createdAt":"2026-08-18T10:30:45Z",
+  "expiresAt":"2026-08-18T10:45:45Z",
+  "decisionAt":null,
+  "completedAt":null,
+  "decisionChannel":null,
+  "decisionReference":null,
+  "completedResult":null,
+  "version":1,
+  "notificationStatus":"SUCCEEDED",
+  "notificationDestination":"a***@example.test"
+}
+```
+
+The citizen account ID, reference hash, and approval-token hash are not serialized. `completedResult` is the chain-backed verification object after completion.
+
+### POST `/verification-requests`
+
+Purpose: request one-time citizen consent. Authentication: required. Roles: Admin or Official. Scope: caller department. Controller is forbidden.
+
+JSON body:
+
+```json
+{"documentId":"BC-2026-1234","purpose":"Employment onboarding"}
+```
+
+`purpose` is required and limited to 500 characters. The current chain record must belong to the caller department, and its stored document must have an active `citizen_account_id`.
+
+Response `201`:
+
+```json
+{
+  "id":"opaque-request-id",
+  "state":"PENDING",
+  "expiresAt":"2026-08-18T10:45:45Z",
+  "notification":{"channel":"EMAIL","destination":"a***@example.test","status":"SUCCEEDED"}
+}
+```
+
+Errors: `400` malformed/missing purpose or document ID; `401`; `403` Controller or cross-department credential; `404` unknown credential; `409` unlinked/inactive citizen account; `500` persistence failure; `502` blockchain or development-notification failure. A notification failure leaves the request recorded and audited as failed.
+
+### GET `/verification-requests`
+
+Purpose: list authorized requests. Authentication: required. Admin sees its department; Official sees only requests it created in its department. Controller is forbidden.
+
+Query parameters: `state` optional state enum; `limit` integer `1..100`, default `50`; `offset` non-negative integer, default `0`.
+
+Response `200`:
+
+```json
+{"requests":[],"page":{"limit":50,"offset":0,"hasMore":false}}
+```
+
+Errors: `400` invalid filters; `401`; `403`; `500` store failure.
+
+### GET `/verification-requests/{id}`
+
+Purpose: read request status. Authentication: required. Original Official may read its request; department Admin may read any request in its department. Controller and other departments are forbidden.
+
+Response `200`: verification request object above. Tokens are never included.
+
+Errors: `401`; `403`; `404`; `500`.
+
+### POST `/verification-requests/{id}/complete`
+
+Purpose: atomically consume an approval and perform chain-backed verification. Authentication: required. Original Official or a scoped department Admin. State must be `APPROVED`.
+
+Request body: none.
+
+The backend rereads the request's anchored credential hash from Solidity at completion. Approval is consent only; a later revocation or supersession is returned as the current `REVOKED` or `SUPERSEDED` verdict. Completion must occur before the request expiry timestamp, even when approval was granted earlier.
+
+Response `200`:
+
+```json
+{"request":{"id":"opaque-request-id","state":"COMPLETED"},"verification":{"docId":"BC-2026-1234","status":"VALID","expectedHash":"0xabc...","message":"authentic and current"}}
+```
+
+The real `request` value is the complete request object.
+
+Errors: `401`; `403`; `404`; `409` not approved, expired, denied, or already completed; `500` persistence/reference failure; `502` blockchain read failure.
+
+### GET `/consent/{token}`
+
+Purpose: public one-time email-link context. Authentication: none. The token itself authenticates access to this single request.
+
+Response `200` contains only:
+
+```json
+{
+  "requestId":"opaque-request-id",
+  "state":"PENDING",
+  "requester":{"name":"Birth Official","role":"OFFICIAL"},
+  "department":{"id":"birth","name":"Birth Registration Dept"},
+  "documentType":"birth_certificate",
+  "purpose":"Employment onboarding",
+  "expiresAt":"2026-08-18T10:45:45Z"
+}
+```
+
+Errors: `404` invalid token; `409` already decided/used; `410` expired; `500` store failure.
+
+### POST `/consent/{token}/approve`
+
+Purpose: atomically transition `PENDING` to `APPROVED` and append its audit event. Authentication: one-time token. Body: none.
+
+Response `200`:
+
+```json
+{"id":"opaque-request-id","state":"APPROVED","decisionAt":"2026-08-18T10:35:00Z"}
+```
+
+An identical repeated approval returns `200`; a denial followed by approval returns `409`.
+
+Errors: `404` invalid token; `409` conflicting/terminal state; `410` expired; `500` atomic persistence failure.
+
+### POST `/consent/{token}/deny`
+
+Same contract as approve, transitioning to `DENIED`. An identical repeated denial is idempotent. A denied request cannot be completed.
+
+### GET `/development/notifications/{id}`
+
+Purpose: authenticated local-demo substitute for email delivery. Roles/scope match request access: original Official or department Admin. Controller is forbidden.
+
+Response `200`:
+
+```json
+{"requestId":"opaque-request-id","consentUrl":"http://127.0.0.1:5173/consent/<raw-token>","developmentOnly":true}
+```
+
+This is the only API that exposes the raw consent URL. It is authenticated, scoped, held only in process memory, and unavailable after backend restart. It must be removed or disabled when a real notifier is configured. The URL/token is never persisted or audited.
+
+Errors: `401`; `403`; `404` capture unavailable.
 
 ## Temporary diagnostic endpoint
 

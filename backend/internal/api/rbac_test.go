@@ -96,6 +96,9 @@ func rbacFixture(t *testing.T, role, department string) (http.Handler, *apiRegis
 	if err := s.UpsertUserProfileAudited(profile, department, store.AuditActor{ID: "test", Role: "SYSTEM"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.UpsertCitizenAccount(store.CitizenAccount{ID: "citizen-1", DisplayName: "Citizen", Email: "citizen@example.test", Active: true}); err != nil {
+		t.Fatal(err)
+	}
 	registry := &apiRegistry{records: map[[32]byte]chain.Record{}, current: map[string][32]byte{}}
 	return newHandler(registry, s, apiVerifier{user: &auth.User{ID: "user-1", Email: "jwt@example.gov"}}, "0xcontract"), registry
 }
@@ -124,7 +127,7 @@ func issueBody(t *testing.T, department, docType string) (*bytes.Buffer, string)
 	}
 	part.Write([]byte("%PDF-1.4\nminimal"))
 	for key, value := range map[string]string{
-		"dept": department, "doc_type": docType, "doc_id": "DOC-1", "citizen": "Citizen",
+		"dept": department, "doc_type": docType, "doc_id": "DOC-1", "citizen": "Citizen", "citizen_account_id": "citizen-1",
 	} {
 		writer.WriteField(key, value)
 	}
@@ -144,6 +147,12 @@ func TestProtectedRoutesRejectUnauthenticatedRequests(t *testing.T) {
 		{http.MethodPost, "/supersede"},
 		{http.MethodGet, "/credentials/Citizen"},
 		{http.MethodGet, "/documents/hash/download"},
+		{http.MethodGet, "/citizen-accounts"},
+		{http.MethodPost, "/verification-requests"},
+		{http.MethodGet, "/verification-requests"},
+		{http.MethodGet, "/verification-requests/request-id"},
+		{http.MethodPost, "/verification-requests/request-id/complete"},
+		{http.MethodGet, "/development/notifications/request-id"},
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(endpoint.method, endpoint.path, nil))
@@ -262,7 +271,7 @@ func TestAdminCanSupersedeWithinOwnDepartment(t *testing.T) {
 	part.Write([]byte("%PDF-1.4\nreplacement"))
 	for key, value := range map[string]string{
 		"dept": "birth", "old_hash": "0x" + strings.Repeat("0", 62) + "02",
-		"doc_id": "BC-NEW", "citizen": "Citizen",
+		"doc_id": "BC-NEW", "citizen": "Citizen", "citizen_account_id": "citizen-1",
 	} {
 		writer.WriteField(key, value)
 	}

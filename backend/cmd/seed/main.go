@@ -230,6 +230,7 @@ func issue(base, token string, d doc, pdf []byte) (string, error) {
 	}
 	for k, v := range map[string]string{
 		"dept": d.dept, "doc_type": d.docType, "doc_id": d.docID, "citizen": d.citizen,
+		"citizen_account_id": citizenID(d.citizen),
 	} {
 		if err := mw.WriteField(k, v); err != nil {
 			return "", err
@@ -262,6 +263,10 @@ func issue(base, token string, d doc, pdf []byte) (string, error) {
 		return "", err
 	}
 	return out.DocHash, nil
+}
+
+func citizenID(name string) string {
+	return strings.ToLower(strings.ReplaceAll(name, " ", "-"))
 }
 
 // supersede uploads the corrected document and links it to the one it replaces.

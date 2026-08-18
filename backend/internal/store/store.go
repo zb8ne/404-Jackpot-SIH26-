@@ -12,15 +12,16 @@ import (
 )
 
 type Document struct {
-	DocHash   string `json:"docHash"`
-	DocID     string `json:"docId"`
-	DocType   string `json:"docType"`
-	Citizen   string `json:"citizen"`
-	Issuer    string `json:"issuer"`
-	Filename  string `json:"filename"`
-	TxHash    string `json:"txHash"`
-	IssuedAt  string `json:"issuedAt"`
-	SizeBytes int    `json:"sizeBytes"`
+	DocHash          string  `json:"docHash"`
+	DocID            string  `json:"docId"`
+	DocType          string  `json:"docType"`
+	Citizen          string  `json:"citizen"`
+	Issuer           string  `json:"issuer"`
+	Filename         string  `json:"filename"`
+	TxHash           string  `json:"txHash"`
+	IssuedAt         string  `json:"issuedAt"`
+	SizeBytes        int     `json:"sizeBytes"`
+	CitizenAccountID *string `json:"citizenAccountId"`
 }
 
 type Store struct{ db *sql.DB }
@@ -79,6 +80,60 @@ CREATE TABLE IF NOT EXISTS user_profiles (
 );
 CREATE INDEX IF NOT EXISTS idx_user_profiles_department ON user_profiles(department_id);
 
+CREATE TABLE IF NOT EXISTS citizen_accounts (
+  id TEXT PRIMARY KEY,
+  supabase_user_id TEXT UNIQUE,
+  display_name TEXT NOT NULL,
+  email TEXT NOT NULL CHECK (length(trim(email)) > 0),
+  phone TEXT,
+  active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_citizen_accounts_name ON citizen_accounts(display_name);
+
+CREATE TABLE IF NOT EXISTS verification_requests (
+  id TEXT PRIMARY KEY,
+  document_id TEXT NOT NULL,
+  reference_hash TEXT NOT NULL,
+  citizen_account_id TEXT NOT NULL REFERENCES citizen_accounts(id),
+  requester_user_id TEXT NOT NULL,
+  requester_email TEXT NOT NULL DEFAULT '',
+  requester_name TEXT NOT NULL DEFAULT '',
+  requester_role TEXT NOT NULL,
+  department_id TEXT NOT NULL REFERENCES departments(id),
+  department_name TEXT NOT NULL,
+  document_type TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('PENDING','APPROVED','DENIED','EXPIRED','COMPLETED')),
+  purpose TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  decision_at TEXT,
+  completed_at TEXT,
+  approval_token_hash TEXT UNIQUE,
+  decision_channel TEXT,
+  decision_reference TEXT,
+  completed_result_json TEXT,
+  version INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_verification_requests_citizen_state ON verification_requests(citizen_account_id, state, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_verification_requests_requester_state ON verification_requests(requester_user_id, state, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_verification_requests_expiry ON verification_requests(expires_at);
+CREATE INDEX IF NOT EXISTS idx_verification_requests_token ON verification_requests(approval_token_hash);
+CREATE INDEX IF NOT EXISTS idx_verification_requests_document ON verification_requests(document_id);
+CREATE INDEX IF NOT EXISTS idx_verification_requests_department ON verification_requests(department_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS notification_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  verification_request_id TEXT NOT NULL REFERENCES verification_requests(id),
+  channel TEXT NOT NULL,
+  destination_redacted TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('SUCCEEDED','FAILED')),
+  error_message TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notification_request ON notification_attempts(verification_request_id, id DESC);
+
 CREATE TABLE IF NOT EXISTS audit_logs (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   event_id          TEXT NOT NULL UNIQUE,
@@ -136,6 +191,14 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	if err := ensureColumn(db, "documents", "citizen_account_id", "TEXT REFERENCES citizen_accounts(id)"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate documents: %w", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_documents_citizen_account ON documents(citizen_account_id)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("index citizen linkage: %w", err)
+	}
 	for _, d := range defaultDepartments {
 		if _, err := db.Exec(
 			`INSERT OR IGNORE INTO departments (id, display_name, doc_type, active) VALUES (?, ?, ?, ?)`,
@@ -148,24 +211,77 @@ func Open(path string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
+func ensureColumn(db *sql.DB, table, column, definition string) error {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, kind string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
+	return err
+}
+
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) Save(d Document, pdf []byte) error {
 	_, err := s.db.Exec(
-		`INSERT INTO documents (doc_hash, doc_id, doc_type, citizen, issuer, filename, tx_hash, pdf)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.DocHash, d.DocID, d.DocType, d.Citizen, d.Issuer, d.Filename, d.TxHash, pdf,
+		`INSERT INTO documents (doc_hash, doc_id, doc_type, citizen, issuer, filename, tx_hash, pdf, citizen_account_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.DocHash, d.DocID, d.DocType, d.Citizen, d.Issuer, d.Filename, d.TxHash, pdf, d.CitizenAccountID,
 	)
 	return err
 }
 
-const selectCols = `doc_hash, doc_id, doc_type, citizen, issuer, filename, tx_hash, issued_at, length(pdf)`
+const selectCols = `doc_hash, doc_id, doc_type, citizen, issuer, filename, tx_hash, issued_at, length(pdf), citizen_account_id`
 
 func scan(rows interface{ Scan(...any) error }) (Document, error) {
 	var d Document
+	var citizenAccountID sql.NullString
 	err := rows.Scan(&d.DocHash, &d.DocID, &d.DocType, &d.Citizen, &d.Issuer,
-		&d.Filename, &d.TxHash, &d.IssuedAt, &d.SizeBytes)
+		&d.Filename, &d.TxHash, &d.IssuedAt, &d.SizeBytes, &citizenAccountID)
+	if citizenAccountID.Valid {
+		d.CitizenAccountID = &citizenAccountID.String
+	}
 	return d, err
+}
+
+func (s *Store) ByDocumentID(docID string) (Document, bool, error) {
+	row := s.db.QueryRow(`SELECT `+selectCols+` FROM documents WHERE doc_id = ? ORDER BY issued_at DESC, rowid DESC LIMIT 1`, docID)
+	d, err := scan(row)
+	if err == sql.ErrNoRows {
+		return Document{}, false, nil
+	}
+	if err != nil {
+		return Document{}, false, err
+	}
+	return d, true, nil
+}
+
+// LinkDocumentToCitizen is intentionally exposed only to controlled backend
+// tooling. Public APIs never infer ownership from a name or email address.
+func (s *Store) LinkDocumentToCitizen(docID, citizenAccountID string) (int64, error) {
+	result, err := s.db.Exec(`UPDATE documents SET citizen_account_id=? WHERE doc_id=?`, citizenAccountID, docID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 // ByCitizen returns every document ever handed to a citizen, newest first.

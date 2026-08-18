@@ -83,3 +83,30 @@ func TestStampIsDeterministic(t *testing.T) {
 		t.Error("stamping the same bytes twice must produce identical output")
 	}
 }
+
+func TestStampWithConfiguredVerificationURLPreservesMarker(t *testing.T) {
+	orig := Render("BIRTH CERTIFICATE", []string{"Name: Citizen"})
+	verificationURL := "http://127.0.0.1:5173/verify?docId=BC-2026-ABC123"
+	stamped, visible := StampWithQR(orig, "BC-2026-ABC123", verificationURL)
+	if !visible {
+		t.Fatal("expected visible registry page")
+	}
+	if id, ok := docid.Extract(stamped); !ok || id != "BC-2026-ABC123" {
+		t.Fatalf("marker=%q found=%v", id, ok)
+	}
+	bare, _ := Stamp(orig, "BC-2026-ABC123")
+	if bytes.Equal(stamped, bare) {
+		t.Fatal("URL QR payload must differ from legacy bare-ID QR payload")
+	}
+	if renderQR(verificationURL, 0, 0, 100) == renderQR("BC-2026-ABC123", 0, 0, 100) {
+		t.Fatal("QR rendering ignored configured payload")
+	}
+}
+
+func TestLegacyBareIDStampingRemainsCompatible(t *testing.T) {
+	orig := Render("LICENCE", []string{"Name: Citizen"})
+	stamped, _ := Stamp(orig, "DL-LEGACY-1")
+	if id, ok := docid.Extract(stamped); !ok || id != "DL-LEGACY-1" {
+		t.Fatalf("legacy marker=%q found=%v", id, ok)
+	}
+}

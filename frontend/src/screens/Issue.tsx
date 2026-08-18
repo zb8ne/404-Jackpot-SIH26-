@@ -3,9 +3,11 @@ import {
   downloadDocument,
   docTypeLabel,
   getDepartments,
+  getCitizenAccounts,
   getMe,
   issueDocument,
   type Department,
+  type CitizenAccountOption,
   type IssueResult,
 } from '../api'
 import { Hash } from '../components/Hash'
@@ -13,7 +15,8 @@ import { Hash } from '../components/Hash'
 export function Issue() {
   const [departments, setDepartments] = useState<Department[]>([])
   const [dept, setDept] = useState('')
-  const [citizen, setCitizen] = useState('')
+  const [citizens, setCitizens] = useState<CitizenAccountOption[]>([])
+  const [citizenAccountId, setCitizenAccountId] = useState('')
   const [docId, setDocId] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
@@ -21,11 +24,13 @@ export function Issue() {
   const [result, setResult] = useState<IssueResult | null>(null)
 
   useEffect(() => {
-    Promise.all([getDepartments(), getMe()])
-      .then(([allDepartments, me]) => {
+    Promise.all([getDepartments(), getMe(), getCitizenAccounts()])
+      .then(([allDepartments, me, citizenAccounts]) => {
         const d = allDepartments.filter((department) => department.slug === me.department?.id)
         setDepartments(d)
         setDept(d[0]?.slug ?? '')
+        setCitizens(citizenAccounts)
+        setCitizenAccountId(citizenAccounts[0]?.id ?? '')
       })
       .catch((e) => setError(String(e)))
   }, [])
@@ -68,7 +73,8 @@ function generateDocId() {
           dept,
           docType: selected.docTypeName,
           docId: docId.trim(),
-          citizen: citizen.trim(),
+          citizen: citizens.find((candidate) => candidate.id === citizenAccountId)?.displayName ?? '',
+          citizenAccountId,
         }),
       )
     } catch (err) {
@@ -111,7 +117,11 @@ function generateDocId() {
 
         <div>
           <Label>Citizen</Label>
-          <Input value={citizen} onChange={setCitizen} placeholder="Asha Menon" required />
+          <select value={citizenAccountId} onChange={(e) => setCitizenAccountId(e.target.value)} required className="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100">
+            <option value="">Select a provisioned citizen</option>
+            {citizens.map((account) => <option key={account.id} value={account.id}>{account.displayName} · {account.email}</option>)}
+          </select>
+          <p className="mt-2 text-sm text-slate-500">Citizen accounts, including their required email, are provisioned by the controlled backend CLI.</p>
         </div>
 
 {/* changed the button and added a genrate docid button */}
@@ -154,7 +164,7 @@ function generateDocId() {
 
         <button
           type="submit"
-          disabled={busy || !file}
+          disabled={busy || !file || !citizenAccountId}
           className="w-full rounded-xl bg-sky-600 px-6 py-4 text-lg font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
         >
           {busy ? 'Anchoring on chain…' : 'Issue document'}
