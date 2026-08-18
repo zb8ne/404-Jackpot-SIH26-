@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"credreg/backend/internal/auth"
@@ -41,15 +42,21 @@ type Server struct {
 	reader          reader
 	store           *store.Store
 	contractAddress string
+	publicWebURL    string
+	notifications   notifier
 }
 
-func New(c *chain.Client, s *store.Store, verifier auth.TokenVerifier) http.Handler {
-	return newHandler(c, s, verifier, c.Address.Hex())
+func New(c *chain.Client, s *store.Store, verifier auth.TokenVerifier, publicWebURL string) http.Handler {
+	return newHandlerConfigured(c, s, verifier, c.Address.Hex(), publicWebURL, newDevelopmentNotifier())
 }
 
 func newHandler(c registry, s *store.Store, verifier auth.TokenVerifier, contractAddress string) http.Handler {
+	return newHandlerConfigured(c, s, verifier, contractAddress, "http://127.0.0.1:5173", newDevelopmentNotifier())
+}
 
-	srv := &Server{chain: c, reader: c, store: s, contractAddress: contractAddress}
+func newHandlerConfigured(c registry, s *store.Store, verifier auth.TokenVerifier, contractAddress, publicWebURL string, notifications notifier) http.Handler {
+
+	srv := &Server{chain: c, reader: c, store: s, contractAddress: contractAddress, publicWebURL: strings.TrimRight(publicWebURL, "/"), notifications: notifications}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", srv.health)
@@ -60,6 +67,9 @@ func newHandler(c registry, s *store.Store, verifier auth.TokenVerifier, contrac
 	}
 	protected := func(permission rbac.Permission, handler http.HandlerFunc) http.Handler {
 		return authenticated(rbac.Require(permission)(handler))
+	}
+	requestProtected := func(handler http.HandlerFunc) http.Handler {
+		return authenticated(srv.auditDeniedOnly(actionRequestCreated, rbac.Require(rbac.PermissionRequestVerification)(handler)))
 	}
 	audited := func(permission rbac.Permission, action string, handler http.HandlerFunc) http.Handler {
 		return authenticated(srv.audit(action, rbac.Require(permission)(handler)))
@@ -76,6 +86,15 @@ func newHandler(c registry, s *store.Store, verifier auth.TokenVerifier, contrac
 	mux.Handle("GET /documents/{hash}/download", protected(rbac.PermissionViewDept, srv.download))
 	mux.Handle("GET /audit-events", authenticated(http.HandlerFunc(srv.auditEventsAccess)))
 	mux.Handle("GET /monitoring/overview", protected(rbac.PermissionMonitorAll, srv.monitoringOverview))
+	mux.Handle("GET /citizen-accounts", protected(rbac.PermissionIssue, srv.citizenAccounts))
+	mux.Handle("POST /verification-requests", requestProtected(srv.createVerificationRequest))
+	mux.Handle("GET /verification-requests", requestProtected(srv.verificationRequests))
+	mux.Handle("GET /verification-requests/{id}", requestProtected(srv.verificationRequest))
+	mux.Handle("POST /verification-requests/{id}/complete", requestProtected(srv.completeVerificationRequest))
+	mux.Handle("GET /development/notifications/{id}", requestProtected(srv.developmentNotification))
+	mux.HandleFunc("GET /consent/{token}", srv.consentDetails)
+	mux.HandleFunc("POST /consent/{token}/approve", srv.approveConsent)
+	mux.HandleFunc("POST /consent/{token}/deny", srv.denyConsent)
 
 	// TEMPORARY: test Supabase JWT authentication.
 	mux.Handle("GET /auth-test", auth.Middleware(verifier)(
@@ -185,6 +204,19 @@ func (s *Server) citizens(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, names)
 }
 
+func (s *Server) citizenAccounts(w http.ResponseWriter, r *http.Request) {
+	accounts, err := s.store.CitizenAccounts()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load citizen accounts")
+		return
+	}
+	out := []map[string]any{}
+	for _, account := range accounts {
+		out = append(out, map[string]any{"id": account.ID, "displayName": account.DisplayName, "email": maskEmail(account.Email)})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // issue takes a multipart upload: file, dept, doc_id, doc_type, citizen. The
 // compatibility dept field must match the backend-owned authenticated profile.
 func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
@@ -216,10 +248,16 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	docID := strings.TrimSpace(r.FormValue("doc_id"))
-	citizen := strings.TrimSpace(r.FormValue("citizen"))
+	citizenAccountID := strings.TrimSpace(r.FormValue("citizen_account_id"))
+	account, err := s.store.CitizenAccountByID(citizenAccountID)
+	if err != nil || !account.Active {
+		writeErr(w, http.StatusBadRequest, "a valid active citizen_account_id is required")
+		return
+	}
+	citizen := account.DisplayName
 	audit.DocID, audit.Citizen = docID, citizen
-	if docID == "" || citizen == "" {
-		writeErr(w, http.StatusBadRequest, "doc_id and citizen are required")
+	if docID == "" {
+		writeErr(w, http.StatusBadRequest, "doc_id is required")
 		return
 	}
 
@@ -233,7 +271,7 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 	// Stamp first, then hash. The citizen walks away with the stamped file, so
 	// the stamped bytes are the ones the chain has to know about — hashing the
 	// upload as it arrived would anchor a document nobody holds.
-	stamped, marked := pdfdoc.Stamp(pdf, docID)
+	stamped, marked := pdfdoc.StampWithQR(pdf, docID, s.verificationURL(docID))
 	sum := sha256.Sum256(stamped)
 	docHash := "0x" + hex.EncodeToString(sum[:])
 	audit.DocHash = docHash
@@ -250,7 +288,7 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 
 	doc := store.Document{
 		DocHash: docHash, DocID: docID, DocType: docTypeName, Citizen: citizen,
-		Issuer: dept.Address, Filename: filename, TxHash: txHash,
+		Issuer: dept.Address, Filename: filename, TxHash: txHash, CitizenAccountID: &account.ID,
 	}
 	if err := s.store.Save(doc, stamped); err != nil {
 		audit.Outcome = "PARTIAL_FAILURE"
@@ -260,15 +298,20 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 	audit.Result = "VALID"
 
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"docHash":     docHash,
-		"txHash":      txHash,
-		"issuer":      dept.Name,
-		"docType":     docTypeName,
-		"docId":       docID,
-		"citizen":     citizen,
-		"downloadUrl": downloadURL(docHash),
-		"stamped":     marked,
+		"docHash":          docHash,
+		"txHash":           txHash,
+		"issuer":           dept.Name,
+		"docType":          docTypeName,
+		"docId":            docID,
+		"citizen":          citizen,
+		"citizenAccountId": account.ID,
+		"downloadUrl":      downloadURL(docHash),
+		"stamped":          marked,
 	})
+}
+
+func (s *Server) verificationURL(docID string) string {
+	return s.publicWebURL + "/verify?docId=" + url.QueryEscape(docID)
 }
 
 // zeroHash is what an unknown docId resolves to, and what we report as the
@@ -331,6 +374,14 @@ func (s *Server) verifyByID(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("docId")
 	audit := operationFromContext(r.Context())
 	audit.DocID = id
+	if current, known, err := s.reader.CurrentHashOf(r.Context(), id); err == nil && known {
+		hash := "0x" + hex.EncodeToString(current[:])
+		if document, found, _ := s.store.ByHash(hash); found && document.CitizenAccountID != nil {
+			audit.DocHash, audit.Citizen, audit.Outcome, audit.Result = hash, document.Citizen, "DENIED", "CONSENT_REQUIRED"
+			writeErr(w, http.StatusConflict, "citizen consent is required; create a verification request")
+			return
+		}
+	}
 
 	resp := map[string]any{
 		"docId":        id,
@@ -575,16 +626,30 @@ func (s *Server) supersede(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "credential is outside the authenticated department")
 		return
 	}
+	oldDocument, oldDocumentFound, _ := s.store.ByHash(r.FormValue("old_hash"))
 
 	docID := strings.TrimSpace(r.FormValue("doc_id"))
 	citizen := strings.TrimSpace(r.FormValue("citizen"))
+	var citizenAccountID *string
+	if oldDocumentFound && oldDocument.CitizenAccountID != nil {
+		citizen = oldDocument.Citizen
+		citizenAccountID = oldDocument.CitizenAccountID
+	} else {
+		accountID := strings.TrimSpace(r.FormValue("citizen_account_id"))
+		account, accountErr := s.store.CitizenAccountByID(accountID)
+		if accountErr != nil || !account.Active {
+			writeErr(w, http.StatusBadRequest, "a valid active citizen_account_id is required for an unlinked credential")
+			return
+		}
+		citizen, citizenAccountID = account.DisplayName, &account.ID
+	}
 	audit.DocID, audit.Citizen = docID, citizen
 	if docID == "" || citizen == "" {
 		writeErr(w, http.StatusBadRequest, "doc_id and citizen are required")
 		return
 	}
 
-	stamped, marked := pdfdoc.Stamp(pdf, docID)
+	stamped, marked := pdfdoc.StampWithQR(pdf, docID, s.verificationURL(docID))
 	sum := sha256.Sum256(stamped)
 	newHash := "0x" + hex.EncodeToString(sum[:])
 	audit.DocHash = newHash
@@ -600,6 +665,7 @@ func (s *Server) supersede(w http.ResponseWriter, r *http.Request) {
 	doc := store.Document{
 		DocHash: newHash, DocID: docID, DocType: chain.DocTypeName(dept.DocType),
 		Citizen: citizen, Issuer: dept.Address, Filename: filename, TxHash: txHash,
+		CitizenAccountID: citizenAccountID,
 	}
 	if err := s.store.Save(doc, stamped); err != nil {
 		audit.Outcome = "PARTIAL_FAILURE"
@@ -613,7 +679,7 @@ func (s *Server) supersede(w http.ResponseWriter, r *http.Request) {
 		"oldHash":     r.FormValue("old_hash"),
 		"txHash":      txHash,
 		"docId":       docID,
-		"citizen":     citizen,
+		"citizen":     doc.Citizen,
 		"downloadUrl": downloadURL(newHash),
 		"stamped":     marked,
 	})

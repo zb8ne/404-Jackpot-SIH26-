@@ -367,7 +367,9 @@ func operationName(action string) string {
 func validAuditAction(action string) bool {
 	switch action {
 	case actionIssue, actionVerifyFile, actionVerifyID, actionRevoke, actionSupersede,
-		"USER_PROFILE_CREATE", "USER_PROFILE_UPDATE":
+		"USER_PROFILE_CREATE", "USER_PROFILE_UPDATE", actionRequestCreated,
+		actionNotificationAttempt, actionConsentApproved, actionConsentDenied,
+		actionRequestExpired, actionRequestCompleted, actionConsentTokenRejected:
 		return true
 	}
 	return false

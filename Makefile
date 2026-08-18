@@ -63,7 +63,7 @@ test:
 ## build: compile contracts and the Go binaries into ./bin
 build: test
 	@mkdir -p bin
-	cd $(BACKEND) && go build -o ../bin/server ./cmd/server && go build -o ../bin/seed ./cmd/seed && go build -o ../bin/profile-seed ./cmd/profile-seed
+	cd $(BACKEND) && go build -o ../bin/server ./cmd/server && go build -o ../bin/seed ./cmd/seed && go build -o ../bin/profile-seed ./cmd/profile-seed && go build -o ../bin/citizen-seed ./cmd/citizen-seed
 
 ## anvil: start a local node in the background
 anvil:
@@ -86,7 +86,7 @@ deploy:
 ## backend: start the REST API in the background
 backend:
 	@mkdir -p $(RUN)
-	@cd $(BACKEND) && setsid --fork ../bin/server < /dev/null > ../$(RUN)/backend.log 2>&1 & echo $$! > $(RUN)/backend.pid
+	@cd $(BACKEND) && PUBLIC_WEB_URL=$(WEB_URL) setsid --fork ../bin/server < /dev/null > ../$(RUN)/backend.log 2>&1 & echo $$! > $(RUN)/backend.pid
 	@echo "waiting for the backend..."
 	@for i in $$(seq 1 100); do \
 		curl -sf $(API_URL)/health >/dev/null 2>&1 && break; \
@@ -103,6 +103,8 @@ profiles:
 	./bin/profile-seed -db $(BACKEND)/credentials.db -id "$(SEED_BIRTH_USER_ID)" -email "$(SEED_BIRTH_EMAIL)" -name "Birth Demo Admin" -role ADMIN -department birth
 	./bin/profile-seed -db $(BACKEND)/credentials.db -id "$(SEED_TRANSPORT_USER_ID)" -email "$(SEED_TRANSPORT_EMAIL)" -name "Transport Demo Admin" -role ADMIN -department transport
 	./bin/profile-seed -db $(BACKEND)/credentials.db -id "$(SEED_EDUCATION_USER_ID)" -email "$(SEED_EDUCATION_EMAIL)" -name "Education Demo Admin" -role ADMIN -department education
+	./bin/citizen-seed -db $(BACKEND)/credentials.db -id asha-menon -name "Asha Menon" -email asha.menon@example.test
+	./bin/citizen-seed -db $(BACKEND)/credentials.db -id rahul-iyer -name "Rahul Iyer" -email rahul.iyer@example.test
 
 ## seed: authenticated demo documents (requires SEED_*_TOKEN)
 seed:

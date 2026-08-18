@@ -91,7 +91,7 @@ function Verdict({
   onVerifyId,
 }: {
   result: VerifyResult
-  onVerifyId: (docId: string) => void
+  onVerifyId?: (docId: string) => void
 }) {
   const v = verdictOf(result.status)
   const tampered = result.status === 'TAMPERED'
@@ -116,12 +116,12 @@ function Verdict({
           <p className="mt-1 text-sm text-amber-200/70">
             Current hash <Hash value={result.supersededBy.hash} />
           </p>
-          <button
+          {onVerifyId && <button
             onClick={() => onVerifyId(result.supersededBy!.docId)}
             className="mt-4 rounded-lg bg-amber-500/20 px-4 py-2 font-semibold text-amber-100 transition hover:bg-amber-500/30"
           >
             Verify the current version →
-          </button>
+          </button>}
         </div>
       )}
 
@@ -153,6 +153,10 @@ function Verdict({
       </div>
     </div>
   )
+}
+
+export function VerdictPanel({ result }: { result: VerifyResult }) {
+  return <Verdict result={result} />
 }
 
 function Field({

@@ -20,13 +20,14 @@ const (
 type Permission string
 
 const (
-	PermissionIssue      Permission = "issue"
-	PermissionVerify     Permission = "verify"
-	PermissionSupersede  Permission = "supersede"
-	PermissionRevoke     Permission = "revoke"
-	PermissionViewDept   Permission = "view_department"
-	PermissionViewAudit  Permission = "view_department_audit"
-	PermissionMonitorAll Permission = "monitor_all"
+	PermissionIssue               Permission = "issue"
+	PermissionVerify              Permission = "verify"
+	PermissionSupersede           Permission = "supersede"
+	PermissionRevoke              Permission = "revoke"
+	PermissionViewDept            Permission = "view_department"
+	PermissionViewAudit           Permission = "view_department_audit"
+	PermissionRequestVerification Permission = "request_verification"
+	PermissionMonitorAll          Permission = "monitor_all"
 )
 
 var permissions = map[Role]map[Permission]bool{
@@ -34,10 +35,12 @@ var permissions = map[Role]map[Permission]bool{
 	RoleAdmin: {
 		PermissionIssue: true, PermissionVerify: true, PermissionSupersede: true,
 		PermissionRevoke: true, PermissionViewDept: true,
-		PermissionViewAudit: true,
+		PermissionViewAudit:           true,
+		PermissionRequestVerification: true,
 	},
 	RoleOfficial: {
 		PermissionIssue: true, PermissionVerify: true, PermissionViewDept: true,
+		PermissionRequestVerification: true,
 	},
 }
 

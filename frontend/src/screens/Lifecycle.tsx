@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   downloadDocument,
+  getCitizenAccounts,
   getMe,
   revokeDocument,
   supersedeDocument,
@@ -60,14 +61,21 @@ export function Supersede() {
   const [oldHash, setOldHash] = useState('')
   const [docId, setDocId] = useState('')
   const [citizen, setCitizen] = useState('')
+  const [citizenAccountId, setCitizenAccountId] = useState('')
+  const [citizenOptions, setCitizenOptions] = useState<Array<{ id: string; displayName: string; email: string }>>([])
   const [file, setFile] = useState<File | null>(null)
   const [result, setResult] = useState<SupersedeResult | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    getMe()
-      .then((me) => setDepartment(me.department?.id ?? ''))
+    Promise.all([getMe(), getCitizenAccounts()])
+      .then(([me, accounts]) => {
+        setDepartment(me.department?.id ?? '')
+        setCitizenOptions(accounts)
+        setCitizenAccountId(accounts[0]?.id ?? '')
+        setCitizen(accounts[0]?.displayName ?? '')
+      })
       .catch((e) => setError(errorMessage(e)))
   }, [])
 
@@ -84,6 +92,7 @@ export function Supersede() {
         oldHash: oldHash.trim(),
         docId: docId.trim(),
         citizen: citizen.trim(),
+        citizenAccountId,
       }))
     } catch (e) {
       setError(errorMessage(e))
@@ -98,7 +107,13 @@ export function Supersede() {
         <Department value={department} />
         <TextField label="Old document hash" value={oldHash} onChange={setOldHash} placeholder="0x…" mono />
         <TextField label="Replacement document ID" value={docId} onChange={setDocId} placeholder="BC-2026-000001-R1" mono />
-        <TextField label="Citizen" value={citizen} onChange={setCitizen} placeholder="Asha Menon" />
+        <label className="block">
+          <span className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-500">Citizen account (used if the old credential is unlinked)</span>
+          <select value={citizenAccountId} onChange={(e) => { const id = e.target.value; setCitizenAccountId(id); setCitizen(citizenOptions.find((item) => item.id === id)?.displayName ?? '') }} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100">
+            <option value="">Inherit the old credential linkage</option>
+            {citizenOptions.map((item) => <option key={item.id} value={item.id}>{item.displayName} · {item.email}</option>)}
+          </select>
+        </label>
         <label className="block">
           <span className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-500">Replacement PDF</span>
           <input type="file" accept="application/pdf" required onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3 text-slate-300 file:mr-4 file:rounded file:border-0 file:bg-slate-800 file:px-4 file:py-2 file:text-slate-200" />

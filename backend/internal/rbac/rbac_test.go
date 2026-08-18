@@ -15,16 +15,19 @@ func TestPermissionMatrix(t *testing.T) {
 	all := []Permission{
 		PermissionIssue, PermissionVerify, PermissionSupersede,
 		PermissionRevoke, PermissionViewDept, PermissionViewAudit, PermissionMonitorAll,
+		PermissionRequestVerification,
 	}
 	want := map[Role]map[Permission]bool{
 		RoleController: {PermissionMonitorAll: true},
 		RoleAdmin: {
 			PermissionIssue: true, PermissionVerify: true, PermissionSupersede: true,
 			PermissionRevoke: true, PermissionViewDept: true,
-			PermissionViewAudit: true,
+			PermissionViewAudit:           true,
+			PermissionRequestVerification: true,
 		},
 		RoleOfficial: {
 			PermissionIssue: true, PermissionVerify: true, PermissionViewDept: true,
+			PermissionRequestVerification: true,
 		},
 	}
 	for role, permissions := range want {

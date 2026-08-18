@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { getAuditEvents, type AuditAction, type AuditEvent, type AuditOutcome } from '../api'
 import { ErrorPanel, ValidationHeader } from './Monitoring'
 
-const ACTIONS: Array<AuditAction | ''> = ['', 'ISSUE', 'VERIFY_FILE', 'VERIFY_ID', 'REVOKE', 'SUPERSEDE', 'USER_PROFILE_CREATE', 'USER_PROFILE_UPDATE']
+const ACTIONS: Array<AuditAction | ''> = ['', 'ISSUE', 'VERIFY_FILE', 'VERIFY_ID', 'REVOKE', 'SUPERSEDE', 'USER_PROFILE_CREATE', 'USER_PROFILE_UPDATE', 'VERIFICATION_REQUEST_CREATED', 'CONSENT_NOTIFICATION', 'CONSENT_APPROVED', 'CONSENT_DENIED', 'VERIFICATION_REQUEST_EXPIRED', 'VERIFICATION_REQUEST_COMPLETED', 'CONSENT_TOKEN_REJECTED']
 const OUTCOMES: Array<AuditOutcome | ''> = ['', 'SUCCESS', 'FAILURE', 'DENIED', 'PARTIAL_FAILURE']
 
 export function AuditEvents() {
