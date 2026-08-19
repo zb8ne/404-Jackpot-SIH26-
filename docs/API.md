@@ -505,11 +505,11 @@ curl -H 'Authorization: Bearer <controller-token>' http://localhost:8088/monitor
 
 ## Phase 3 citizen consent
 
-Supabase authenticates government users only. Citizens approve or deny through a random, expiring, request-specific email token. SQLite stores only the SHA-256 token hash. Raw tokens and consent URLs are never written to SQLite, audit details, or logs.
+Supabase authenticates government and citizen users. New requests are delivered only to the linked citizen's authenticated web inbox; no email or raw consent URL is generated for the active flow. Legacy token endpoints remain compatible with older token-backed records.
 
 New credentials are stamped with `{PUBLIC_WEB_URL}/verify?docId={url-encoded-document-id}` before hashing and anchoring. Existing PDFs with bare-ID QR values remain valid and readable. The QR frontend creates a consent request and does not display a registry verdict before completion.
 
-Verification requests expire 15 minutes after creation. States are `PENDING`, `APPROVED`, `DENIED`, `EXPIRED`, and `COMPLETED`. An identical repeated approve/deny is idempotent; conflicting decisions and repeated completion return `409`. Expiry is enforced when requests or tokens are read or changed.
+Verification requests expire 24 hours after creation. States are `PENDING`, `APPROVED`, `DENIED`, `EXPIRED`, and `COMPLETED`. Expiry is enforced when requests are read or changed.
 
 ### GET `/citizen-accounts`
 
@@ -565,7 +565,7 @@ Government request APIs return:
   "completedResult":null,
   "version":1,
   "notificationStatus":"SUCCEEDED",
-  "notificationDestination":"a***@example.test"
+  "notificationDestination":"citizen-asha"
 }
 ```
 
@@ -590,11 +590,11 @@ Response `201`:
   "id":"opaque-request-id",
   "state":"PENDING",
   "expiresAt":"2026-08-18T10:45:45Z",
-  "notification":{"channel":"EMAIL","destination":"a***@example.test","status":"SUCCEEDED"}
+  "notification":{"channel":"WEB_INBOX","destination":"citizen-asha","status":"SUCCEEDED"}
 }
 ```
 
-Errors: `400` malformed/missing purpose or document ID; `401`; `403` Controller or cross-department credential; `404` unknown credential; `409` unlinked/inactive citizen account; `500` persistence failure; `502` blockchain or development-notification failure. A notification failure leaves the request recorded and audited as failed.
+Errors: `400` malformed/missing purpose or document ID; `401`; `403` Controller or cross-department credential; `404` unknown credential; `409` unlinked/inactive citizen account; `500` persistence or inbox-delivery recording failure; `502` blockchain failure.
 
 ### GET `/verification-requests`
 
@@ -636,7 +636,15 @@ The real `request` value is the complete request object.
 
 Errors: `401`; `403`; `404`; `409` not approved, expired, denied, or already completed; `500` persistence/reference failure; `502` blockchain read failure.
 
-### GET `/consent/{token}`
+### GET `/citizen/verification-requests`
+
+Purpose: list verification requests belonging to the authenticated citizen account. Authentication: required. Account type: active Citizen. Ownership is derived from the verified Supabase identity. Results are newest first and pending requests are lazily marked expired when their 24-hour deadline has passed.
+
+Response `200`: `{"requests":[<verification request objects>]}`.
+
+Errors: `401`; `403` missing/inactive citizen profile; `409` ambiguous dual-linked identity; `500` storage failure.
+
+### GET `/consent/{token}` (legacy)
 
 Purpose: public one-time email-link context. Authentication: none. The token itself authenticates access to this single request.
 

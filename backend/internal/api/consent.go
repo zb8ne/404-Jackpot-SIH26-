@@ -19,7 +19,7 @@ import (
 	"credreg/backend/internal/store"
 )
 
-const verificationRequestTTL = 15 * time.Minute
+const verificationRequestTTL = 24 * time.Hour
 
 const (
 	actionRequestCreated       = "VERIFICATION_REQUEST_CREATED"
@@ -130,11 +130,6 @@ func (s *Server) createVerificationRequest(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	token, tokenHash, err := newConsentToken()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "could not create consent token")
-		return
-	}
 	now := time.Now().UTC()
 	request := store.VerificationRequest{
 		ID: newOpaqueID(), DocumentID: body.DocumentID, ReferenceHash: hash,
@@ -143,7 +138,7 @@ func (s *Server) createVerificationRequest(w http.ResponseWriter, r *http.Reques
 		RequesterRole: principal.Profile.Role, DepartmentID: principal.Profile.Department.ID,
 		DepartmentName: principal.Profile.Department.DisplayName, DocumentType: chain.DocTypeName(record.DocType),
 		State: "PENDING", Purpose: body.Purpose, CreatedAt: now.Format(time.RFC3339Nano),
-		ExpiresAt: now.Add(verificationRequestTTL).Format(time.RFC3339Nano), ApprovalTokenHash: &tokenHash,
+		ExpiresAt: now.Add(verificationRequestTTL).Format(time.RFC3339Nano),
 	}
 	event := requestAuditEvent(principal, request, actionRequestCreated, "SUCCESS", "PENDING", http.StatusCreated)
 	if err := s.store.CreateVerificationRequest(request, event); err != nil {
@@ -151,29 +146,32 @@ func (s *Server) createVerificationRequest(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	consentURL := s.publicWebURL + "/consent/" + token
-	notifyErr := s.notifications.Send(request.ID, account.Email, consentURL)
-	notifyStatus, auditOutcome := "SUCCEEDED", "SUCCESS"
-	notifyError := ""
-	if notifyErr != nil {
-		notifyStatus, auditOutcome, notifyError = "FAILED", "FAILURE", notifyErr.Error()
-	}
-	notifyEvent := requestAuditEvent(principal, request, actionNotificationAttempt, auditOutcome, notifyStatus, http.StatusOK)
-	if notifyError != "" {
-		notifyEvent.Error = optionalString(notifyError)
-	}
-	if err := s.store.RecordNotification(request.ID, maskEmail(account.Email), notifyStatus, notifyError, notifyEvent); err != nil {
-		writeErr(w, http.StatusInternalServerError, "request created but notification record failed")
-		return
-	}
-	if notifyErr != nil {
-		writeErr(w, http.StatusBadGateway, "verification request created but consent notification failed")
+	notifyEvent := requestAuditEvent(principal, request, actionNotificationAttempt, "SUCCESS", "SUCCEEDED", http.StatusOK)
+	notifyEvent.Details["channel"] = "WEB_INBOX"
+	if err := s.store.RecordInboxDelivery(request.ID, account.ID, notifyEvent); err != nil {
+		writeErr(w, http.StatusInternalServerError, "request created but inbox delivery record failed")
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"id": request.ID, "state": "PENDING", "expiresAt": request.ExpiresAt,
-		"notification": map[string]any{"channel": "EMAIL", "destination": maskEmail(account.Email), "status": "SUCCEEDED"},
+		"notification": map[string]any{"channel": "WEB_INBOX", "destination": account.ID, "status": "SUCCEEDED"},
 	})
+}
+
+func (s *Server) citizenVerificationRequests(w http.ResponseWriter, r *http.Request) {
+	account, ok := s.authenticatedCitizen(w, r)
+	if !ok {
+		return
+	}
+	requests, err := s.store.VerificationRequests(store.VerificationRequestQuery{CitizenAccountID: account.ID, Limit: 100})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load verification requests")
+		return
+	}
+	for i := range requests {
+		s.expireIfNeeded(&requests[i])
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"requests": requests})
 }
 
 func (s *Server) verificationRequest(w http.ResponseWriter, r *http.Request) {

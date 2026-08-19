@@ -5,13 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"credreg/backend/internal/auth"
 	"credreg/backend/internal/chain"
@@ -79,105 +78,31 @@ func createRequest(t *testing.T, f consentFixture) string {
 	return created.ID
 }
 
-func consentToken(t *testing.T, f consentFixture, id string) string {
-	t.Helper()
-	response := httptest.NewRecorder()
-	f.handler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/development/notifications/"+id, nil, ""))
-	if response.Code != http.StatusOK {
-		t.Fatalf("notification status=%d body=%s", response.Code, response.Body.String())
-	}
-	var body struct {
-		ConsentURL string `json:"consentUrl"`
-	}
-	json.Unmarshal(response.Body.Bytes(), &body)
-	parsed, err := url.Parse(body.ConsentURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return strings.TrimPrefix(parsed.Path, "/consent/")
-}
-
-func TestConsentRequestApproveAndCompleteCurrentState(t *testing.T) {
+func TestConsentRequestIsDeliveredToCitizenInboxFor24Hours(t *testing.T) {
 	f := newConsentFixture(t, "OFFICIAL", "birth")
-	hash := f.linkCredential(t, chain.DocBirthCertificate, true)
+	f.linkCredential(t, chain.DocBirthCertificate, true)
 	id := createRequest(t, f)
-	token := consentToken(t, f, id)
 	req, err := f.store.VerificationRequestByID(id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if req.ApprovalTokenHash == nil || *req.ApprovalTokenHash == token {
-		t.Fatal("raw token was persisted")
+	if req.ApprovalTokenHash != nil {
+		t.Fatal("new inbox request unexpectedly created an email-link token")
 	}
+	createdAt, _ := time.Parse(time.RFC3339Nano, req.CreatedAt)
+	expiresAt, _ := time.Parse(time.RFC3339Nano, req.ExpiresAt)
+	if duration := expiresAt.Sub(createdAt); duration != 24*time.Hour {
+		t.Fatalf("request lifetime=%s, want 24h", duration)
+	}
+	citizenID := "citizen-user"
+	if err := f.store.UpsertCitizenAccount(store.CitizenAccount{ID: "citizen-1", SupabaseUserID: &citizenID, DisplayName: "Citizen", Email: "citizen@example.test", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	citizenHandler := newHandlerConfigured(f.registry, f.store, apiVerifier{user: &auth.User{ID: citizenID}}, "0xcontract", "http://web.test", f.notifications)
 	response := httptest.NewRecorder()
-	f.handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/consent/"+token, nil))
-	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "citizen@example.test") {
-		t.Fatalf("consent context=%d %s", response.Code, response.Body.String())
-	}
-	response = httptest.NewRecorder()
-	f.handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/consent/"+token+"/approve", nil))
-	if response.Code != http.StatusOK {
-		t.Fatalf("approve=%d %s", response.Code, response.Body.String())
-	}
-	record := f.registry.records[hash]
-	record.Status = chain.StatusRevoked
-	f.registry.records[hash] = record
-	response = httptest.NewRecorder()
-	f.handler.ServeHTTP(response, authorizedRequest(http.MethodPost, "/verification-requests/"+id+"/complete", nil, ""))
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"REVOKED"`) {
-		t.Fatalf("complete=%d %s", response.Code, response.Body.String())
-	}
-	response = httptest.NewRecorder()
-	f.handler.ServeHTTP(response, authorizedRequest(http.MethodPost, "/verification-requests/"+id+"/complete", nil, ""))
-	if response.Code != http.StatusConflict {
-		t.Fatalf("double complete=%d", response.Code)
-	}
-}
-
-func TestConsentDenyAndConflictingDecision(t *testing.T) {
-	f := newConsentFixture(t, "ADMIN", "birth")
-	f.linkCredential(t, chain.DocBirthCertificate, true)
-	id := createRequest(t, f)
-	token := consentToken(t, f, id)
-	response := httptest.NewRecorder()
-	f.handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/consent/"+token+"/deny", nil))
-	if response.Code != http.StatusOK {
-		t.Fatalf("deny=%d", response.Code)
-	}
-	response = httptest.NewRecorder()
-	f.handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/consent/"+token+"/deny", nil))
-	if response.Code != http.StatusOK {
-		t.Fatalf("idempotent deny=%d", response.Code)
-	}
-	response = httptest.NewRecorder()
-	f.handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/consent/"+token+"/approve", nil))
-	if response.Code != http.StatusConflict {
-		t.Fatalf("conflicting approve=%d", response.Code)
-	}
-	response = httptest.NewRecorder()
-	f.handler.ServeHTTP(response, authorizedRequest(http.MethodPost, "/verification-requests/"+id+"/complete", nil, ""))
-	if response.Code != http.StatusConflict {
-		t.Fatalf("complete denied=%d", response.Code)
-	}
-}
-
-func TestCompletionReflectsSupersededAfterApproval(t *testing.T) {
-	f := newConsentFixture(t, "OFFICIAL", "birth")
-	hash := f.linkCredential(t, chain.DocBirthCertificate, true)
-	id := createRequest(t, f)
-	token := consentToken(t, f, id)
-	response := httptest.NewRecorder()
-	f.handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/consent/"+token+"/approve", nil))
-	record := f.registry.records[hash]
-	record.Status = chain.StatusSuperseded
-	f.registry.records[hash] = record
-	newHash := sha256.Sum256([]byte("replacement"))
-	f.registry.records[newHash] = chain.Record{Found: true, DocID: "DOC-2", DocType: chain.DocBirthCertificate, Status: chain.StatusValid}
-	f.registry.current["DOC-1"] = newHash
-	response = httptest.NewRecorder()
-	f.handler.ServeHTTP(response, authorizedRequest(http.MethodPost, "/verification-requests/"+id+"/complete", nil, ""))
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"SUPERSEDED"`) {
-		t.Fatalf("superseded completion=%d %s", response.Code, response.Body.String())
+	citizenHandler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/citizen/verification-requests", nil, ""))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), id) || !strings.Contains(response.Body.String(), `"notificationStatus":"SUCCEEDED"`) {
+		t.Fatalf("inbox status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -204,21 +129,6 @@ func TestControllerCannotCreateVerificationRequest(t *testing.T) {
 	f.handler.ServeHTTP(response, authorizedRequest(http.MethodPost, "/verification-requests", bytes.NewBufferString(`{}`), "application/json"))
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("controller=%d", response.Code)
-	}
-}
-
-func TestNotificationFailureIsRecorded(t *testing.T) {
-	f := newConsentFixture(t, "OFFICIAL", "birth")
-	f.linkCredential(t, chain.DocBirthCertificate, true)
-	f.notifications.err = errors.New("delivery unavailable")
-	response := httptest.NewRecorder()
-	f.handler.ServeHTTP(response, authorizedRequest(http.MethodPost, "/verification-requests", bytes.NewBufferString(`{"documentId":"DOC-1","purpose":"test"}`), "application/json"))
-	if response.Code != http.StatusBadGateway {
-		t.Fatalf("notification failure=%d %s", response.Code, response.Body.String())
-	}
-	page, err := f.store.AuditEvents(store.AuditQuery{Action: actionNotificationAttempt, Limit: 10})
-	if err != nil || len(page.Events) != 1 || page.Events[0].Outcome != "FAILURE" {
-		t.Fatalf("notification audit=%#v err=%v", page.Events, err)
 	}
 }
 

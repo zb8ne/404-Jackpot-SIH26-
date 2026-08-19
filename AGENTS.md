@@ -63,7 +63,7 @@ SQLite stores stamped PDFs and metadata, stable departments, government profiles
 5. The backend stores stamped PDFs and off-chain metadata in SQLite.
 6. Verification reads the authoritative hash/status from the contract and supplements it with SQLite metadata when available.
 7. Important credential operations and profile authorization changes append hash-chained SQLite audit events with the human actor, department, outcome, and relevant credential/transaction references.
-8. A QR verification URL leads an authenticated Admin/Official into a one-time request. The citizen approves or denies through an expiring email token; approved completion rereads the requested hash's current Solidity status.
+8. A QR verification URL leads an authenticated Admin/Official into a one-time request delivered to the linked citizen's authenticated web inbox; approved completion rereads the requested hash's current Solidity status.
 9. Successful frontend operations publish typed scene events to an in-process bus. The Demo UI translates them into queued PixiJS animations; eligible roles also receive best-effort cross-tab events from audit polling.
 
 ## 3. EXISTING FUNCTIONALITY
@@ -163,6 +163,7 @@ Looking up the ID first would misclassify a genuine superseded original because 
 - `POST /verification-requests`, `GET /verification-requests`, `GET /verification-requests/{id}`, and `POST /verification-requests/{id}/complete`
 - `GET /consent/{token}`, `POST /consent/{token}/approve`, and `POST /consent/{token}/deny` (token-authenticated, no Supabase citizen login)
 - `GET /development/notifications/{id}` (authenticated/scoped in-memory demo email capture)
+- `GET /citizen/verification-requests` (authenticated citizen's ownership-scoped inbox)
 
 ## 4. AUTHENTICATION
 
@@ -266,7 +267,7 @@ Profile authorization changes use the audited store method, which commits the pr
 
 Phase 3 implements:
 
-`QR scan -> verification page -> government user authenticates -> request + purpose -> development email capture -> citizen email link -> approve/deny -> approved requester completes -> current chain verdict`
+`QR scan -> verification page -> government user authenticates -> request + purpose -> citizen web inbox -> approve/deny -> approved requester completes -> current chain verdict`
 
 Citizen approval applies to one specific verification request. It must not permanently authorize an official or department.
 
@@ -278,7 +279,7 @@ The request lifecycle is:
 - `EXPIRED`
 - `COMPLETED`
 
-Citizens are separate from government `user_profiles`; `CITIZEN` is not an RBAC role. Citizen accounts require email and are provisioned with `backend/cmd/citizen-seed`. The optional unique `supabase_user_id` links a citizen account to Supabase Auth, and `CitizenAccountBySupabaseUserID` is the trusted lookup for authenticated citizen identity. `GET /account` resolves a verified Supabase identity against both profile tables, rejects missing/inactive or ambiguous dual-linked identities, and returns a discriminated `GOVERNMENT`/`CITIZEN` response. Routine reseeding without `-supabase-user-id` preserves an existing identity link. Raw random tokens/URLs exist only in the authenticated in-memory development notification capture; SQLite stores SHA-256 token hashes. Tokens expire after 15 minutes and are request-specific. Consent decisions and completion use guarded atomic transitions, and consent/audit writes are atomic. No scheduler or real email provider is included.
+Citizens are separate from government `user_profiles`; `CITIZEN` is not an RBAC role. Citizen accounts require email and are provisioned with `backend/cmd/citizen-seed`. The optional unique `supabase_user_id` links a citizen account to Supabase Auth, and `CitizenAccountBySupabaseUserID` is the trusted lookup for authenticated citizen identity. `GET /account` resolves a verified Supabase identity against both profile tables, rejects missing/inactive or ambiguous dual-linked identities, and returns a discriminated `GOVERNMENT`/`CITIZEN` response. Routine reseeding without `-supabase-user-id` preserves an existing identity link. New consent requests are delivered only to the ownership-scoped web inbox and expire after 24 hours. Legacy token endpoints remain for pre-existing token-backed records, but new requests do not create or expose email links.
 
 `POST /verify` remains the authenticated file-possession authenticity check. Direct `GET /verify/{docId}` returns `409` for linked credentials so it cannot bypass consent; it remains compatible for old unlinked credentials. The QR frontend never calls direct ID verification.
 
@@ -409,7 +410,7 @@ Do not invent response fields or endpoints. If the frontend needs a role, depart
 - URL-based QR stamping for new credentials with legacy bare-ID compatibility.
 - Consent-gated verification requests, expiring hashed tokens, atomic approve/deny/complete transitions, and current-chain completion.
 - Minimal QR landing, request status/completion, and public citizen consent screens.
-- In-memory authenticated development notification capture with redacted persistent attempts.
+- Authenticated citizen verification-request inbox with 24-hour expiry and persisted `WEB_INBOX` delivery attempts.
 - Docker Compose orchestration for Anvil, deployment, profile/citizen provisioning, backend, authenticated document seeding, and the Vite frontend.
 - Optional Doppler-driven environment injection, with `.env.example` as the non-Doppler configuration template.
 - Split backend/frontend container images, Vercel SPA rewrite configuration, and a standalone root image that co-locates Anvil and the Go backend for Railway-style hosting.

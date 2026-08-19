@@ -121,6 +121,7 @@ type VerificationRequest struct {
 type VerificationRequestQuery struct {
 	Limit, Offset                        int
 	State, RequesterUserID, DepartmentID string
+	CitizenAccountID                     string
 }
 
 func (s *Store) CreateVerificationRequest(req VerificationRequest, event AuditEvent) error {
@@ -165,6 +166,10 @@ func (s *Store) VerificationRequests(q VerificationRequestQuery) ([]Verification
 		where = append(where, "vr.department_id=?")
 		args = append(args, q.DepartmentID)
 	}
+	if q.CitizenAccountID != "" {
+		where = append(where, "vr.citizen_account_id=?")
+		args = append(args, q.CitizenAccountID)
+	}
 	limit := q.Limit
 	if limit == 0 {
 		limit = 50
@@ -193,6 +198,17 @@ func (s *Store) RecordNotification(requestID, destination, status, errorMessage 
 			failure = errorMessage
 		}
 		_, err := conn.ExecContext(ctx, `INSERT INTO notification_attempts (verification_request_id, channel, destination_redacted, status, error_message, created_at) VALUES (?, 'EMAIL', ?, ?, ?, ?)`, requestID, destination, status, failure, time.Now().UTC().Format(time.RFC3339Nano))
+		if err != nil {
+			return err
+		}
+		_, err = appendAuditEvent(ctx, conn, event)
+		return err
+	})
+}
+
+func (s *Store) RecordInboxDelivery(requestID, citizenAccountID string, event AuditEvent) error {
+	return s.withImmediate(func(ctx context.Context, conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, `INSERT INTO notification_attempts (verification_request_id, channel, destination_redacted, status, created_at) VALUES (?, 'WEB_INBOX', ?, 'SUCCEEDED', ?)`, requestID, citizenAccountID, time.Now().UTC().Format(time.RFC3339Nano))
 		if err != nil {
 			return err
 		}

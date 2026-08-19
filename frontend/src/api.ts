@@ -355,6 +355,7 @@ export const createVerificationRequest = (documentId: string, purpose: string) =
 
 export const getVerificationRequest = (id: string) => request<VerificationRequest>(`/verification-requests/${encodeURIComponent(id)}`)
 export const listVerificationRequests = (state?: VerificationRequestState) => request<{ requests: VerificationRequest[]; page: { limit: number; offset: number; hasMore: boolean } }>(`/verification-requests${state ? `?state=${state}` : ''}`)
+export const listCitizenVerificationRequests = () => request<{ requests: VerificationRequest[] }>('/citizen/verification-requests').then((result) => result.requests)
 export const completeVerificationRequest = (id: string) => request<{ request: VerificationRequest; verification: VerifyResult }>(`/verification-requests/${encodeURIComponent(id)}/complete`, { method: 'POST' })
 export const getDevelopmentConsentURL = (id: string) => request<{ requestId: string; consentUrl: string; developmentOnly: boolean }>(`/development/notifications/${encodeURIComponent(id)}`)
 export const getConsentDetails = (token: string) => request<ConsentDetails>(`/consent/${encodeURIComponent(token)}`, {}, false)
