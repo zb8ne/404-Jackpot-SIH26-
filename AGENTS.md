@@ -18,6 +18,7 @@ This guide currently describes the `demo-ui` line of development. The Demo UI co
 
 - React 19 + TypeScript, built with Vite and styled with Tailwind CSS.
 - Entry point: `frontend/src/main.tsx`; application shell: `frontend/src/App.tsx`.
+- `frontend/src/components/AppShell.tsx` owns account-aware workspace chrome and the navigation set for Controller, Admin, Official, and Citizen sessions.
 - There is currently no router. The application switches between tabs in `App.tsx`.
 - Supabase client setup is in `frontend/src/lib/supabase.ts`.
 - Backend request functions and shared response types, including `/health`, are centralized in `frontend/src/api.ts`.
@@ -118,6 +119,7 @@ Looking up the ID first would misclassify a genuine superseded original because 
 ### Existing frontend screens
 
 - `frontend/src/screens/Login.tsx`: role-intent selection for Controller, Government Authority (Admin/Official), and Citizen followed by Supabase email/password sign-in. The selection is session-scoped presentation state only; backend profile resolution remains authoritative.
+- The authenticated shell displays backend-owned identity and department context. Government roles receive only their allowed workspaces; citizens receive separate My Credentials and Inbox navigation placeholders for the following phases.
 - `frontend/src/screens/Verify.tsx`: PDF upload/drop verification and result display, with a helper path for verifying an ID.
 - `frontend/src/screens/Issue.tsx`: department selection, citizen/document fields, PDF upload, client-side ID generation, and stamped-document result/download.
 - `frontend/src/screens/Citizen.tsx`: citizen selection and credential history.
