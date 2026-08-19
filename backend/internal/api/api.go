@@ -81,6 +81,8 @@ func newHandlerConfigured(c registry, s *store.Store, verifier auth.TokenVerifie
 
 	mux.Handle("GET /me", authenticated(http.HandlerFunc(srv.me)))
 	mux.Handle("GET /account", identityAuthenticated(http.HandlerFunc(srv.account)))
+	mux.Handle("GET /citizen/credentials", identityAuthenticated(http.HandlerFunc(srv.citizenCredentials)))
+	mux.Handle("GET /citizen/documents/{hash}/download", identityAuthenticated(http.HandlerFunc(srv.citizenDownload)))
 	mux.Handle("GET /citizens", protected(rbac.PermissionViewDept, srv.citizens))
 	mux.Handle("POST /issue", audited(rbac.PermissionIssue, actionIssue, srv.issue))
 	mux.Handle("POST /verify", audited(rbac.PermissionVerify, actionVerifyFile, srv.verify))
@@ -790,6 +792,95 @@ func (s *Server) credentials(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"citizen": citizen, "documents": out})
+}
+
+func (s *Server) citizenCredentials(w http.ResponseWriter, r *http.Request) {
+	account, ok := s.authenticatedCitizen(w, r)
+	if !ok {
+		return
+	}
+	docs, err := s.store.ByCitizenAccountID(account.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load credentials")
+		return
+	}
+	type entry struct {
+		store.Document
+		Status string `json:"status"`
+	}
+	out := []entry{}
+	for _, doc := range docs {
+		item := entry{Document: doc, Status: "UNKNOWN"}
+		if hash, err := parseHash(doc.DocHash); err == nil {
+			if record, err := s.reader.Verify(r.Context(), hash); err == nil && record.Found {
+				item.Status = statusName(record.Status)
+			}
+		}
+		out = append(out, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"citizen": account.DisplayName, "documents": out})
+}
+
+func (s *Server) citizenDownload(w http.ResponseWriter, r *http.Request) {
+	account, ok := s.authenticatedCitizen(w, r)
+	if !ok {
+		return
+	}
+	hash := r.PathValue("hash")
+	document, found, err := s.store.ByHash(hash)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load document")
+		return
+	}
+	if !found {
+		writeErr(w, http.StatusNotFound, "no such document")
+		return
+	}
+	if document.CitizenAccountID == nil || *document.CitizenAccountID != account.ID {
+		writeErr(w, http.StatusForbidden, "document does not belong to this citizen account")
+		return
+	}
+	pdf, found, err := s.store.PDF(hash)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load document")
+		return
+	}
+	if !found {
+		writeErr(w, http.StatusNotFound, "no such document")
+		return
+	}
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, document.Filename))
+	w.Write(pdf)
+}
+
+func (s *Server) authenticatedCitizen(w http.ResponseWriter, r *http.Request) (store.CitizenAccount, bool) {
+	user, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "authenticated user missing from context")
+		return store.CitizenAccount{}, false
+	}
+	if _, err := s.store.UserProfileByID(user.ID); err == nil {
+		writeErr(w, http.StatusConflict, "identity is linked to both government and citizen accounts")
+		return store.CitizenAccount{}, false
+	} else if !errors.Is(err, store.ErrNotFound) {
+		writeErr(w, http.StatusInternalServerError, "could not load application account")
+		return store.CitizenAccount{}, false
+	}
+	account, err := s.store.CitizenAccountBySupabaseUserID(user.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeErr(w, http.StatusForbidden, "no citizen account is linked to this identity")
+		return store.CitizenAccount{}, false
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load citizen account")
+		return store.CitizenAccount{}, false
+	}
+	if !account.Active {
+		writeErr(w, http.StatusForbidden, "citizen account is inactive")
+		return store.CitizenAccount{}, false
+	}
+	return account, true
 }
 
 func (s *Server) download(w http.ResponseWriter, r *http.Request) {

@@ -151,6 +151,8 @@ Looking up the ID first would misclassify a genuine superseded original because 
 - `POST /revoke`
 - `POST /supersede`
 - `GET /credentials/{citizen}`
+- `GET /citizen/credentials` (authenticated citizen's own linked documents)
+- `GET /citizen/documents/{hash}/download` (ownership-scoped citizen PDF download)
 - `GET /documents/{hash}/download`
 - `GET /me` (authenticated application profile)
 - `GET /account` (authenticated unified government/citizen account bootstrap)
@@ -388,6 +390,7 @@ Do not invent response fields or endpoints. If the frontend needs a role, depart
 - PDF marker/QR stamping with incremental-update and fallback behavior.
 - Verification verdict state machine with Go tests.
 - SQLite document/PDF storage, citizen lookup, credential listing, and download.
+- Authenticated citizen dashboard with Supabase-identity-derived credential listing and ownership-checked stamped-PDF downloads.
 - Issue, verify, supersede, and revoke backend handlers.
 - Verify, Issue, Citizen, and Login frontend screens.
 - Supabase email/password login and session handling.

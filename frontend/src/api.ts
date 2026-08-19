@@ -293,6 +293,9 @@ export const getCredentials = (citizen: string) =>
   request<{ citizen: string; documents: Credential[] }>(`/credentials/${encodeURIComponent(citizen)}`)
     .then((r) => r.documents)
 
+export const getMyCredentials = () =>
+  request<{ citizen: string; documents: Credential[] }>('/citizen/credentials').then((r) => r.documents)
+
 export const verifyFile = (file: File) => {
   const form = new FormData()
   form.append('file', file)

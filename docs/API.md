@@ -141,6 +141,18 @@ curl -H 'Authorization: Bearer <token>' http://localhost:8088/me
 
 ## Department credential reads
 
+### GET `/citizen/credentials`
+
+Purpose: list every stamped credential issued to the authenticated citizen account, enriched with current on-chain status. Authentication: required. Account type: active Citizen. Ownership is derived from the verified Supabase `sub`; the request accepts no citizen identifier.
+
+Response `200` uses the same credential objects as `GET /credentials/{citizen}`. Errors: `401`; `403` missing/inactive citizen account; `409` ambiguous dual-linked identity; `500` storage failure.
+
+### GET `/citizen/documents/{hash}/download`
+
+Purpose: download the stored stamped PDF only when its `citizen_account_id` equals the authenticated citizen account. Authentication: required. Account type: active Citizen.
+
+Errors: `401`; `403` document belongs to another citizen or the identity is not an active Citizen; `404` unknown document; `409` ambiguous dual-linked identity; `500` storage failure.
+
 ### GET `/citizens`
 
 Purpose: list citizens having a stored document of the caller's department document type. Authentication: required. Roles: Admin or Official. Scope: caller department.

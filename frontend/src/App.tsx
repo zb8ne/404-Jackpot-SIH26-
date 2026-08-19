@@ -12,6 +12,7 @@ import { VerificationRequestFlow } from './screens/VerificationRequest'
 import { supabase } from './lib/supabase'
 import { lazy, Suspense } from 'react'
 import { AppShell, type ShellTab } from './components/AppShell'
+import { CitizenDashboard } from './screens/CitizenDashboard'
 
 // Pixi + the scene engine are a lot of bytes for a form-filling app to load up
 // front; only the account holders who actually see live activity pay for it.
@@ -137,7 +138,7 @@ export default function App() {
       )}
 
       {account.accountType === 'CITIZEN' ? (
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/50 p-8">
+        tab === 'my-credentials' ? <CitizenDashboard /> : <section className="rounded-2xl border border-slate-800 bg-slate-900/50 p-8">
           <p className="text-xs font-semibold uppercase tracking-widest text-sky-400">{tab === 'inbox' ? 'Citizen inbox' : 'My credentials'}</p>
           <h2 className="mt-2 text-3xl font-black text-slate-100">
             {tab === 'inbox' ? 'Verification requests' : `Welcome, ${account.citizenProfile.displayName}`}

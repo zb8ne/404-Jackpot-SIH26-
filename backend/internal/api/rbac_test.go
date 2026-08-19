@@ -140,6 +140,8 @@ func TestProtectedRoutesRejectUnauthenticatedRequests(t *testing.T) {
 	for _, endpoint := range []struct{ method, path string }{
 		{http.MethodGet, "/me"},
 		{http.MethodGet, "/account"},
+		{http.MethodGet, "/citizen/credentials"},
+		{http.MethodGet, "/citizen/documents/hash/download"},
 		{http.MethodGet, "/citizens"},
 		{http.MethodPost, "/issue"},
 		{http.MethodPost, "/verify"},
@@ -402,6 +404,54 @@ func TestAccountRejectsMissingAmbiguousAndInactiveProfiles(t *testing.T) {
 				t.Fatalf("status = %d, want %d; body = %s", response.Code, test.wantStatus, response.Body.String())
 			}
 		})
+	}
+}
+
+func TestCitizenCanOnlyReadAndDownloadOwnCredentials(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	supabaseID := "citizen-user"
+	for _, account := range []store.CitizenAccount{
+		{ID: "citizen-1", SupabaseUserID: &supabaseID, DisplayName: "Citizen One", Email: "one@example.test", Active: true},
+		{ID: "citizen-2", DisplayName: "Citizen Two", Email: "two@example.test", Active: true},
+	} {
+		if err := s.UpsertCitizenAccount(account); err != nil {
+			t.Fatal(err)
+		}
+	}
+	one, two := "citizen-1", "citizen-2"
+	oneHash := "0x" + strings.Repeat("0", 63) + "1"
+	twoHash := "0x" + strings.Repeat("0", 63) + "2"
+	if err := s.Save(store.Document{DocHash: oneHash, DocID: "OWN-1", DocType: "birth_certificate", Citizen: "Citizen One", Filename: "own.pdf", CitizenAccountID: &one}, []byte("own pdf")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(store.Document{DocHash: twoHash, DocID: "OTHER-1", DocType: "birth_certificate", Citizen: "Citizen Two", Filename: "other.pdf", CitizenAccountID: &two}, []byte("other pdf")); err != nil {
+		t.Fatal(err)
+	}
+	registry := &apiRegistry{records: map[[32]byte]chain.Record{}, current: map[string][32]byte{}}
+	var anchored [32]byte
+	anchored[31] = 1
+	registry.records[anchored] = chain.Record{Found: true, DocID: "OWN-1", Status: chain.StatusValid}
+	handler := newHandler(registry, s, apiVerifier{user: &auth.User{ID: supabaseID}}, "0xcontract")
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/citizen/credentials", nil, ""))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "OWN-1") || strings.Contains(response.Body.String(), "OTHER-1") {
+		t.Fatalf("credential list was not ownership scoped: status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/citizen/documents/"+oneHash+"/download", nil, ""))
+	if response.Code != http.StatusOK || response.Body.String() != "own pdf" {
+		t.Fatalf("own download status=%d body=%q", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/citizen/documents/"+twoHash+"/download", nil, ""))
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("other citizen download status=%d, want 403", response.Code)
 	}
 }
 

@@ -302,6 +302,23 @@ func (s *Store) ByCitizenAndDocType(citizen, docType string) ([]Document, error)
 	return s.byCitizen(citizen, docType, true)
 }
 
+func (s *Store) ByCitizenAccountID(citizenAccountID string) ([]Document, error) {
+	rows, err := s.db.Query(`SELECT `+selectCols+` FROM documents WHERE citizen_account_id = ? ORDER BY issued_at DESC, rowid DESC`, citizenAccountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	docs := []Document{}
+	for rows.Next() {
+		doc, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		docs = append(docs, doc)
+	}
+	return docs, rows.Err()
+}
+
 func (s *Store) byCitizen(citizen, docType string, scoped bool) ([]Document, error) {
 	query := `SELECT ` + selectCols + ` FROM documents WHERE citizen = ?`
 	args := []any{citizen}
