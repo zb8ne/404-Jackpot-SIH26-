@@ -319,7 +319,13 @@ export function buildGuidedSteps(profile: ApplicationUser | null): GuidedStep[] 
   const canRequestConsent = profile?.role === 'OFFICIAL' || profile?.role === 'ADMIN'
   steps.push({
     id: 'consent',
-    title: `Ask the citizen's consent to check ${state.correctedDocId || state.docId}`,
+    // Not interpolated with a docId here: by the time this step displays, the
+    // supersede step above may or may not have run yet, and this title is
+    // computed once when the script is built — state.correctedDocId is still
+    // empty at that point even though it will be set before this step runs.
+    // The specific id shows up correctly once the step actually plays, via the
+    // floor's caption (which resolves targetDocId at run time, not build time).
+    title: "Ask the citizen's consent to check the current document",
     blurb: 'The verifier waits; the citizen approves before any verdict is revealed.',
     mode: canRequestConsent ? 'real' : 'preview',
     previewReason: notSignedIn,
