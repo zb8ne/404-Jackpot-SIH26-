@@ -8,9 +8,9 @@ This file preserves repository context for future Codex sessions. Treat the chec
 
 Verification distinguishes an authentic current document from an authentic superseded or revoked document, a modified document, and a document that was never issued. Superseding adds a replacement without deleting the original, preserving credential history.
 
-The repository is a demo built around Anvil. Phase 1 Supabase/RBAC, Phase 2 audit/monitoring, and Phase 3 QR-based citizen-consent verification are implemented. It can run locally as a Docker Compose stack or directly on the host, and it includes container/Vercel configuration for hosted demonstrations.
+The repository is a demo built around Anvil. Phase 1 Supabase/RBAC, Phase 2 audit/monitoring, Phase 3 QR-started citizen consent, and the authenticated citizen-portal flow are implemented. It can run locally as a Docker Compose stack or directly on the host, and it includes container/Vercel configuration for hosted demonstrations.
 
-This guide currently describes the `demo-ui` line of development. The Demo UI commits are present on `demo-ui` but are not yet merged into `main` as of commit `f58f8d1`.
+This guide currently describes the cumulative `feature/citizen-portal-flow` branch in the user's fork, based on the Demo UI line of development.
 
 ## 2. CURRENT ARCHITECTURE
 
@@ -413,8 +413,8 @@ Do not invent response fields or endpoints. If the frontend needs a role, depart
 - Minimal temporary Controller monitoring, Controller/Admin audit-event, and Admin lifecycle validation screens.
 - Separate citizen accounts with mandatory email and controlled provisioning/linking CLI.
 - URL-based QR stamping for new credentials with legacy bare-ID compatibility.
-- Consent-gated verification requests, expiring hashed tokens, atomic approve/deny/complete transitions, and current-chain completion.
-- Minimal QR landing, request status/completion, and public citizen consent screens.
+- Consent-gated verification requests with 24-hour authenticated inbox delivery, atomic approve/deny/complete transitions, and current-chain completion.
+- QR-started government request flow, authenticated citizen inbox, and durable government request dashboard.
 - Authenticated citizen verification-request inbox with 24-hour expiry and persisted `WEB_INBOX` delivery attempts.
 - Docker Compose orchestration for Anvil, deployment, profile/citizen provisioning, backend, authenticated document seeding, and the Vite frontend.
 - Optional Doppler-driven environment injection, with `.env.example` as the non-Doppler configuration template.
@@ -430,7 +430,7 @@ Do not invent response fields or endpoints. If the frontend needs a role, depart
 - Monitoring statistics cover retained audit events, not operations performed before audit logging was introduced.
 - Supabase authentication has been manually validated end-to-end, but there is no automated live-Supabase integration test.
 - Monitoring, Audit Events, Revoke, and Supersede frontend screens are intentionally minimal temporary validation UI, not the frontend team's final dashboard.
-- Development notifications do not send real email and disappear on backend restart.
+- The running local stack currently has no Supabase user ID linked to either demo citizen; a live browser citizen-login walkthrough requires provisioning a Supabase citizen and setting `SEED_ASHA_USER_ID` or `SEED_RAHUL_USER_ID`.
 - Existing unlinked credentials cannot use secure consent until linked explicitly with controlled tooling.
 - The Demo UI visualization has been browser-validated in preview mode, but the commit history does not establish a complete browser-validated live walkthrough for every RBAC role and hosted environment.
 - `/demo` and the consent/verification entry paths still use manual pathname handling rather than a router.
@@ -440,14 +440,13 @@ Do not invent response fields or endpoints. If the frontend needs a role, depart
 ### C. Planned/not implemented
 
 - Final Controller dashboard UI (the backend contracts and temporary validation UI are implemented).
-- Real email provider integration and production notification delivery/retry policy.
 - A final routed frontend architecture; Phase 3 uses minimal pathname/query handling.
 - Production wallet/key management.
 - Replacement or appropriately licensed production artwork for the Demo UI.
 
 ## 16. CURRENT NEXT PHASE
 
-Phase 1 — RBAC Foundation, Phase 2 — Audit + Administrative Monitoring, and Phase 3 — QR Citizen Consent are implemented. Docker/Vercel/Railway-oriented demo deployment work is present on `main`. The PixiJS Demo UI is implemented on `demo-ui` through commit `f58f8d1` but is not merged into `main`. The next functional phase must be explicitly agreed before implementation.
+Phase 1 — RBAC Foundation, Phase 2 — Audit + Administrative Monitoring, Phase 3 — QR-started consent, and the authenticated citizen portal/inbox workflow are implemented on `feature/citizen-portal-flow`. The next functional phase must be explicitly agreed before implementation.
 
 Before changing code in a future session:
 
@@ -460,6 +459,6 @@ Before changing code in a future session:
 
 ## CURRENT STATE / NEXT TASK
 
-**Current state:** Core lifecycle, URL/bare-ID compatible stamping, SQLite persistence, blockchain anchoring, Supabase government authentication, backend RBAC, audit/monitoring, citizen accounts and document linkage, consent requests, hashed one-time email tokens, current-chain completion, Docker/hosted-demo configuration, and minimal Phase 2/3 validation UI are implemented. This `demo-ui` branch additionally contains the PixiJS registry-floor visualization, preview driver, live event bridge, audit fallback, and role-aware guided walkthrough.
+**Current state:** Core lifecycle, exact-PDF verification, SQLite persistence, blockchain anchoring, Supabase authentication, government RBAC, citizen accounts, citizen-owned credential downloads, 24-hour web-inbox consent, persistent decisions, government request recovery/completion, list-driven lifecycle actions, Docker/hosted-demo configuration, and the PixiJS registry-floor visualization are implemented.
 
-**Next task:** Validate the Demo UI's live guided path end-to-end with configured Supabase accounts and the Docker Compose stack, decide whether/how to merge `demo-ui`, then agree on the next bounded phase. Do not add real notification infrastructure or redesign the frontend without explicit scope.
+**Next task:** Provision and link at least one real Supabase citizen account, then browser-validate the live government QR/request -> citizen inbox decision -> government completion flow. The automated API flow, Go suites, frontend build, Compose configuration, and running service health are green.
