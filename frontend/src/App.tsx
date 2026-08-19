@@ -14,6 +14,7 @@ import { lazy, Suspense } from 'react'
 import { AppShell, type ShellTab } from './components/AppShell'
 import { CitizenDashboard } from './screens/CitizenDashboard'
 import { CitizenInbox } from './screens/CitizenInbox'
+import { GovernmentRequests } from './screens/GovernmentRequests'
 
 // Pixi + the scene engine are a lot of bytes for a form-filling app to load up
 // front; only the account holders who actually see live activity pay for it.
@@ -147,6 +148,7 @@ export default function App() {
             {tab === 'revoke' && profile.role === 'ADMIN' && <Revoke />}
             {tab === 'supersede' && profile.role === 'ADMIN' && <Supersede />}
             {tab === 'citizen' && <Citizen />}
+            {tab === 'requests' && <GovernmentRequests />}
             {tab === 'audit' && profile.role !== 'OFFICIAL' && <AuditEvents />}
             {tab === 'monitoring' && profile.role === 'CONTROLLER' && <Monitoring />}
           </>

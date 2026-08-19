@@ -11,6 +11,7 @@ export type ShellTab =
   | 'monitoring'
   | 'my-credentials'
   | 'inbox'
+  | 'requests'
 
 type NavigationItem = { id: ShellTab; label: string; hint: string }
 
@@ -23,6 +24,7 @@ const GOVERNMENT_NAVIGATION: Record<'CONTROLLER' | 'ADMIN' | 'OFFICIAL', Navigat
     { id: 'verify', label: 'Verify', hint: 'Check a document' },
     { id: 'issue', label: 'Issue', hint: 'Create a credential' },
     { id: 'citizen', label: 'Credentials', hint: 'Department records' },
+    { id: 'requests', label: 'Requests', hint: 'Citizen consent' },
     { id: 'revoke', label: 'Revoke', hint: 'End validity' },
     { id: 'supersede', label: 'Supersede', hint: 'Issue a replacement' },
     { id: 'audit', label: 'Audit', hint: 'Department activity' },
@@ -31,6 +33,7 @@ const GOVERNMENT_NAVIGATION: Record<'CONTROLLER' | 'ADMIN' | 'OFFICIAL', Navigat
     { id: 'verify', label: 'Verify', hint: 'Check a document' },
     { id: 'issue', label: 'Issue', hint: 'Create a credential' },
     { id: 'citizen', label: 'Credentials', hint: 'Department records' },
+    { id: 'requests', label: 'Requests', hint: 'Citizen consent' },
   ],
 }
 

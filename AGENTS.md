@@ -123,6 +123,8 @@ Looking up the ID first would misclassify a genuine superseded original because 
 - `frontend/src/screens/Verify.tsx`: PDF upload/drop verification and result display, with a helper path for verifying an ID.
 - `frontend/src/screens/Issue.tsx`: department selection, citizen/document fields, PDF upload, client-side ID generation, and stamped-document result/download.
 - `frontend/src/screens/Citizen.tsx`: citizen selection and credential history.
+- `frontend/src/screens/CitizenDashboard.tsx` and `CitizenInbox.tsx`: authenticated citizen-owned PDFs and persisted verification decisions.
+- `frontend/src/screens/GovernmentRequests.tsx`: Admin/Official request history, state filters, refresh, and approved-request completion independent of the original QR browser session.
 - `frontend/src/screens/Monitoring.tsx` and `frontend/src/screens/AuditEvents.tsx`: minimal temporary Phase 2 browser-validation UI, intentionally replaceable by the frontend team's final dashboard.
 - `frontend/src/screens/Lifecycle.tsx`: minimal temporary Admin-only revoke/supersede validation forms using the existing Phase 2 API contracts.
 - `frontend/src/screens/Demo.tsx`: standalone `/demo` PixiJS registry-floor presentation with a nine-step role-aware guided walkthrough and a manual preview-event panel.
