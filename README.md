@@ -97,11 +97,14 @@ Citizen accounts require an email; phone is optional and is not used for consent
 ```sh
 cd backend
 go run ./cmd/citizen-seed -db credentials.db -id citizen-asha \
-  -name 'Asha Menon' -email asha@example.test
+  -name 'Asha Menon' -email asha@example.test \
+  -supabase-user-id '<supabase-user-id>'
 ```
 
 Use `-link-doc-id` only when explicitly linking an older stored credential. Ownership is
-never inferred from a name or email address.
+never inferred from a name or email address. `-supabase-user-id` links the citizen to
+Supabase login; rerunning the command without that optional flag preserves an existing
+identity link.
 
 ## The demo
 

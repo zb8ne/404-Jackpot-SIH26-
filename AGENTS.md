@@ -273,7 +273,7 @@ The request lifecycle is:
 - `EXPIRED`
 - `COMPLETED`
 
-Citizens are separate from government `user_profiles`; `CITIZEN` is not an RBAC role. Citizen accounts require email and are provisioned with `backend/cmd/citizen-seed`. Raw random tokens/URLs exist only in the authenticated in-memory development notification capture; SQLite stores SHA-256 token hashes. Tokens expire after 15 minutes and are request-specific. Consent decisions and completion use guarded atomic transitions, and consent/audit writes are atomic. No scheduler or real email provider is included.
+Citizens are separate from government `user_profiles`; `CITIZEN` is not an RBAC role. Citizen accounts require email and are provisioned with `backend/cmd/citizen-seed`. The optional unique `supabase_user_id` links a citizen account to Supabase Auth, and `CitizenAccountBySupabaseUserID` is the trusted lookup for future authenticated citizen handlers. Routine reseeding without `-supabase-user-id` preserves an existing identity link. Raw random tokens/URLs exist only in the authenticated in-memory development notification capture; SQLite stores SHA-256 token hashes. Tokens expire after 15 minutes and are request-specific. Consent decisions and completion use guarded atomic transitions, and consent/audit writes are atomic. No scheduler or real email provider is included.
 
 `POST /verify` remains the authenticated file-possession authenticity check. Direct `GET /verify/{docId}` returns `409` for linked credentials so it cannot bypass consent; it remains compatible for old unlinked credentials. The QR frontend never calls direct ID verification.
 

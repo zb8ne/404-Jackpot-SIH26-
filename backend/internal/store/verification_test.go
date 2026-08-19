@@ -29,6 +29,45 @@ func TestCitizenAccountRequiresEmailAndDocumentLink(t *testing.T) {
 	}
 }
 
+func TestCitizenAccountSupabaseIdentityIsUniqueAndResolvable(t *testing.T) {
+	s := openTestStore(t)
+	supabaseID := "supabase-citizen-1"
+	account := CitizenAccount{
+		ID: "citizen-1", SupabaseUserID: &supabaseID,
+		DisplayName: "Citizen", Email: "citizen@example.test", Active: true,
+	}
+	if err := s.UpsertCitizenAccount(account); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.CitizenAccountBySupabaseUserID(supabaseID)
+	if err != nil || got.ID != account.ID {
+		t.Fatalf("account=%#v err=%v", got, err)
+	}
+
+	// Routine provisioning without the optional flag must not silently unlink
+	// an identity that was linked previously.
+	account.SupabaseUserID = nil
+	account.DisplayName = "Updated Citizen"
+	if err := s.UpsertCitizenAccount(account); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.CitizenAccountBySupabaseUserID(supabaseID)
+	if err != nil || got.DisplayName != account.DisplayName {
+		t.Fatalf("preserved account=%#v err=%v", got, err)
+	}
+
+	duplicate := CitizenAccount{
+		ID: "citizen-2", SupabaseUserID: &supabaseID,
+		DisplayName: "Other Citizen", Email: "other@example.test", Active: true,
+	}
+	if err := s.UpsertCitizenAccount(duplicate); err == nil {
+		t.Fatal("expected duplicate Supabase identity to be rejected")
+	}
+	if _, err := s.CitizenAccountBySupabaseUserID("unknown"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown identity error=%v, want ErrNotFound", err)
+	}
+}
+
 func TestConsentDecisionIsAtomicAndSinglePurpose(t *testing.T) {
 	s := openTestStore(t)
 	seedVerificationRequest(t, s, time.Now().UTC().Add(time.Hour))

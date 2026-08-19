@@ -195,6 +195,14 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate documents: %w", err)
 	}
+	if err := ensureColumn(db, "citizen_accounts", "supabase_user_id", "TEXT"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate citizen identity: %w", err)
+	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_citizen_accounts_supabase_user ON citizen_accounts(supabase_user_id) WHERE supabase_user_id IS NOT NULL`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("index citizen identity: %w", err)
+	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_documents_citizen_account ON documents(citizen_account_id)`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("index citizen linkage: %w", err)

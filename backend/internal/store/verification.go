@@ -37,7 +37,7 @@ func (s *Store) UpsertCitizenAccount(account CitizenAccount) error {
 	_, err = s.db.Exec(`
 		INSERT INTO citizen_accounts (id, supabase_user_id, display_name, email, phone, active)
 		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET supabase_user_id=excluded.supabase_user_id,
+		ON CONFLICT(id) DO UPDATE SET supabase_user_id=COALESCE(excluded.supabase_user_id, citizen_accounts.supabase_user_id),
 		 display_name=excluded.display_name, email=excluded.email, phone=excluded.phone,
 		 active=excluded.active, updated_at=datetime('now')`,
 		account.ID, account.SupabaseUserID, account.DisplayName, account.Email, account.Phone, account.Active)
@@ -46,6 +46,13 @@ func (s *Store) UpsertCitizenAccount(account CitizenAccount) error {
 
 func (s *Store) CitizenAccountByID(id string) (CitizenAccount, error) {
 	return scanCitizen(s.db.QueryRow(`SELECT id, supabase_user_id, display_name, email, phone, active, created_at, updated_at FROM citizen_accounts WHERE id=?`, id))
+}
+
+// CitizenAccountBySupabaseUserID resolves an authenticated Supabase identity
+// to its backend-owned citizen account. Citizen-facing handlers must use this
+// lookup instead of trusting an account id supplied by the browser.
+func (s *Store) CitizenAccountBySupabaseUserID(supabaseUserID string) (CitizenAccount, error) {
+	return scanCitizen(s.db.QueryRow(`SELECT id, supabase_user_id, display_name, email, phone, active, created_at, updated_at FROM citizen_accounts WHERE supabase_user_id=?`, strings.TrimSpace(supabaseUserID)))
 }
 
 func (s *Store) CitizenAccounts() ([]CitizenAccount, error) {

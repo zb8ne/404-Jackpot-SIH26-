@@ -91,6 +91,8 @@ services:
       SEED_EDUCATION_USER_ID: ${SEED_EDUCATION_USER_ID:-}
       SEED_BIRTH_OFFICIAL_USER_ID: ${SEED_BIRTH_OFFICIAL_USER_ID:-}
       SEED_CONTROLLER_USER_ID: ${SEED_CONTROLLER_USER_ID:-}
+      SEED_ASHA_USER_ID: ${SEED_ASHA_USER_ID:-}
+      SEED_RAHUL_USER_ID: ${SEED_RAHUL_USER_ID:-}
       SEED_BIRTH_EMAIL: ${SEED_BIRTH_EMAIL:-birth.admin@example.test}
       SEED_TRANSPORT_EMAIL: ${SEED_TRANSPORT_EMAIL:-transport.admin@example.test}
       SEED_EDUCATION_EMAIL: ${SEED_EDUCATION_EMAIL:-education.admin@example.test}
@@ -125,8 +127,16 @@ services:
         else
           echo "skipping Controller profile: SEED_CONTROLLER_USER_ID is unset"
         fi
-        citizen-seed -db /data/credentials.db -id asha-menon -name "Asha Menon" -email asha.menon@example.test
-        citizen-seed -db /data/credentials.db -id rahul-iyer -name "Rahul Iyer" -email rahul.iyer@example.test
+        if [ -n "$$SEED_ASHA_USER_ID" ]; then
+          citizen-seed -db /data/credentials.db -id asha-menon -name "Asha Menon" -email asha.menon@example.test -supabase-user-id "$$SEED_ASHA_USER_ID"
+        else
+          citizen-seed -db /data/credentials.db -id asha-menon -name "Asha Menon" -email asha.menon@example.test
+        fi
+        if [ -n "$$SEED_RAHUL_USER_ID" ]; then
+          citizen-seed -db /data/credentials.db -id rahul-iyer -name "Rahul Iyer" -email rahul.iyer@example.test -supabase-user-id "$$SEED_RAHUL_USER_ID"
+        else
+          citizen-seed -db /data/credentials.db -id rahul-iyer -name "Rahul Iyer" -email rahul.iyer@example.test
+        fi
 
   backend:
     build:
