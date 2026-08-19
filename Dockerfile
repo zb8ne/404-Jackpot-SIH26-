@@ -21,8 +21,7 @@ WORKDIR /contracts
 COPY contracts /contracts
 
 COPY --from=build /out/server /usr/local/bin/server
-COPY deploy/standalone/start.sh /start.sh
-RUN chmod +x /start.sh
+COPY --chmod=755 deploy/standalone/start.sh /start.sh
 
 ENV DATA_DIR=/data \
     ADDR=:8088
