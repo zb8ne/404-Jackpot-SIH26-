@@ -17,6 +17,12 @@ RUN CGO_ENABLED=0 go build -o /out/server ./cmd/server
 
 FROM ghcr.io/foundry-rs/foundry:latest
 
+# The base image drops to a non-root user; start.sh needs to create /data
+# (a Railway volume mount point) at the filesystem root, which that user
+# can't do. This is a single-purpose container, not a multi-tenant image,
+# so running as root here isn't a meaningful security tradeoff.
+USER root
+
 WORKDIR /contracts
 COPY contracts /contracts
 
