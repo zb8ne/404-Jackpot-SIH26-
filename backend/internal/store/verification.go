@@ -276,6 +276,61 @@ func (s *Store) DecideConsent(tokenHash, decision string, event AuditEvent) (Ver
 	return result, err
 }
 
+func (s *Store) DecideCitizenRequest(id, citizenAccountID, decision string, event AuditEvent) (VerificationRequest, error) {
+	var result VerificationRequest
+	var decisionErr error
+	err := s.withImmediate(func(ctx context.Context, conn *sql.Conn) error {
+		req, err := scanVerificationRequest(conn.QueryRowContext(ctx, verificationRequestSelect+` WHERE vr.id=? AND vr.citizen_account_id=?`, id, citizenAccountID))
+		if err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		if req.State == decision {
+			result = req
+			return nil
+		}
+		if req.State == "EXPIRED" {
+			decisionErr = ErrExpired
+			return nil
+		}
+		if req.State != "PENDING" {
+			return ErrConflict
+		}
+		expires, err := time.Parse(time.RFC3339Nano, req.ExpiresAt)
+		if err != nil {
+			return err
+		}
+		if !now.Before(expires) {
+			if _, err := conn.ExecContext(ctx, `UPDATE verification_requests SET state='EXPIRED', version=version+1 WHERE id=? AND state='PENDING'`, req.ID); err != nil {
+				return err
+			}
+			event.Action, event.Result = "VERIFICATION_REQUEST_EXPIRED", "EXPIRED"
+			if _, err := appendAuditEvent(ctx, conn, event); err != nil {
+				return err
+			}
+			decisionErr = ErrExpired
+			return nil
+		}
+		decisionAt := now.Format(time.RFC3339Nano)
+		updated, err := conn.ExecContext(ctx, `UPDATE verification_requests SET state=?, decision_at=?, decision_channel='WEB_INBOX', decision_reference=?, version=version+1 WHERE id=? AND citizen_account_id=? AND state='PENDING'`, decision, decisionAt, citizenAccountID, id, citizenAccountID)
+		if err != nil {
+			return err
+		}
+		if count, _ := updated.RowsAffected(); count != 1 {
+			return ErrConflict
+		}
+		if _, err := appendAuditEvent(ctx, conn, event); err != nil {
+			return err
+		}
+		result, err = scanVerificationRequest(conn.QueryRowContext(ctx, verificationRequestSelect+` WHERE vr.id=?`, id))
+		return err
+	})
+	if err == nil && decisionErr != nil {
+		return VerificationRequest{}, decisionErr
+	}
+	return result, err
+}
+
 func (s *Store) ExpireVerificationRequest(id string, event AuditEvent) (bool, error) {
 	changed := false
 	err := s.withImmediate(func(ctx context.Context, conn *sql.Conn) error {

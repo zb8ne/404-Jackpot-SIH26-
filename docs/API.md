@@ -644,6 +644,14 @@ Response `200`: `{"requests":[<verification request objects>]}`.
 
 Errors: `401`; `403` missing/inactive citizen profile; `409` ambiguous dual-linked identity; `500` storage failure.
 
+### POST `/citizen/verification-requests/{id}/decision`
+
+Purpose: atomically approve or deny a pending request owned by the authenticated citizen. Authentication: required. Account type: active Citizen.
+
+JSON body: `{"decision":"APPROVED"}` or `{"decision":"DENIED"}`. An identical repeated decision is idempotent. The decision, timestamp, `WEB_INBOX` channel, and audit event are persisted in one transaction, so the result survives logout and browser closure.
+
+Errors: `400` invalid decision; `401`; `403` missing/inactive citizen profile; `404` request absent or owned by another citizen; `409` conflicting/already completed decision; `410` expired request; `500` persistence failure.
+
 ### GET `/consent/{token}` (legacy)
 
 Purpose: public one-time email-link context. Authentication: none. The token itself authenticates access to this single request.

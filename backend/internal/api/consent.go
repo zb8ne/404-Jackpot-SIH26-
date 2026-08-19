@@ -174,6 +174,51 @@ func (s *Server) citizenVerificationRequests(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, map[string]any{"requests": requests})
 }
 
+func (s *Server) decideCitizenVerificationRequest(w http.ResponseWriter, r *http.Request) {
+	account, ok := s.authenticatedCitizen(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Decision string `json:"decision"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "expected decision")
+		return
+	}
+	decision := strings.ToUpper(strings.TrimSpace(body.Decision))
+	if decision != "APPROVED" && decision != "DENIED" {
+		writeErr(w, http.StatusBadRequest, "decision must be APPROVED or DENIED")
+		return
+	}
+	req, err := s.store.VerificationRequestByID(r.PathValue("id"))
+	if errors.Is(err, store.ErrNotFound) || (err == nil && req.CitizenAccountID != account.ID) {
+		writeErr(w, http.StatusNotFound, "verification request not found")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load verification request")
+		return
+	}
+	action := actionConsentApproved
+	if decision == "DENIED" {
+		action = actionConsentDenied
+	}
+	event := citizenAuditEvent(req, action, "SUCCESS", decision, http.StatusOK)
+	event.Details["channel"] = "WEB_INBOX"
+	updated, err := s.store.DecideCitizenRequest(req.ID, account.ID, decision, event)
+	switch {
+	case errors.Is(err, store.ErrExpired):
+		writeErr(w, http.StatusGone, "verification request expired")
+	case errors.Is(err, store.ErrConflict):
+		writeErr(w, http.StatusConflict, "verification request was already decided")
+	case err != nil:
+		writeErr(w, http.StatusInternalServerError, "could not save decision")
+	default:
+		writeJSON(w, http.StatusOK, updated)
+	}
+}
+
 func (s *Server) verificationRequest(w http.ResponseWriter, r *http.Request) {
 	req, ok := s.authorizedVerificationRequest(w, r, r.PathValue("id"))
 	if !ok {

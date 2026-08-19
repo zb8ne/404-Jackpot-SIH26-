@@ -1,10 +1,20 @@
 import { useEffect, useState } from 'react'
-import { docTypeLabel, listCitizenVerificationRequests, type VerificationRequest } from '../api'
+import { decideCitizenVerificationRequest, docTypeLabel, listCitizenVerificationRequests, type VerificationRequest } from '../api'
 
 export function CitizenInbox() {
   const [requests, setRequests] = useState<VerificationRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+
+  async function decide(id: string, decision: 'APPROVED' | 'DENIED') {
+    setError('')
+    try {
+      const updated = await decideCitizenVerificationRequest(id, decision)
+      setRequests((current) => current.map((request) => request.id === id ? updated : request))
+    } catch (e) {
+      setError(String(e))
+    }
+  }
 
   useEffect(() => {
     listCitizenVerificationRequests().then(setRequests).catch((e) => setError(String(e))).finally(() => setLoading(false))
@@ -18,7 +28,9 @@ export function CitizenInbox() {
     <div className="space-y-4">{requests.map((request) => <article key={request.id} className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
       <div className="flex flex-wrap items-start justify-between gap-4"><div><h3 className="text-xl font-bold">{docTypeLabel(request.documentType)}</h3><p className="mt-1 font-mono text-sm text-slate-400">{request.documentId}</p></div><StateBadge state={request.state} /></div>
       <dl className="mt-6 grid gap-4 sm:grid-cols-2"><Row label="Requested by" value={`${request.requesterName} · ${request.departmentName}`} /><Row label="Expires" value={new Date(request.expiresAt).toLocaleString()} /><Row label="Purpose" value={request.purpose} /></dl>
-      {request.state === 'PENDING' && <p className="mt-5 text-sm text-sky-300">Decision controls are added in the next phase.</p>}
+      {request.state === 'PENDING' && <div className="mt-6 flex flex-wrap gap-3"><button type="button" onClick={() => void decide(request.id, 'APPROVED')} className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold text-white hover:bg-emerald-500">Approve request</button><button type="button" onClick={() => void decide(request.id, 'DENIED')} className="rounded-xl border border-red-500/50 px-5 py-3 font-semibold text-red-300 hover:bg-red-500/10">Deny request</button></div>}
+      {request.state === 'APPROVED' && <p className="mt-5 text-sm text-emerald-300">Approved. The requesting official can now complete verification.</p>}
+      {request.state === 'DENIED' && <p className="mt-5 text-sm text-red-300">You denied this request.</p>}
     </article>)}</div>
   </section>
 }

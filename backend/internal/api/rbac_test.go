@@ -143,6 +143,7 @@ func TestProtectedRoutesRejectUnauthenticatedRequests(t *testing.T) {
 		{http.MethodGet, "/citizen/credentials"},
 		{http.MethodGet, "/citizen/documents/hash/download"},
 		{http.MethodGet, "/citizen/verification-requests"},
+		{http.MethodPost, "/citizen/verification-requests/request-id/decision"},
 		{http.MethodGet, "/citizens"},
 		{http.MethodPost, "/issue"},
 		{http.MethodPost, "/verify"},

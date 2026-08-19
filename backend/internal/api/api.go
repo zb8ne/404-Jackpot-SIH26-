@@ -84,6 +84,7 @@ func newHandlerConfigured(c registry, s *store.Store, verifier auth.TokenVerifie
 	mux.Handle("GET /citizen/credentials", identityAuthenticated(http.HandlerFunc(srv.citizenCredentials)))
 	mux.Handle("GET /citizen/documents/{hash}/download", identityAuthenticated(http.HandlerFunc(srv.citizenDownload)))
 	mux.Handle("GET /citizen/verification-requests", identityAuthenticated(http.HandlerFunc(srv.citizenVerificationRequests)))
+	mux.Handle("POST /citizen/verification-requests/{id}/decision", identityAuthenticated(http.HandlerFunc(srv.decideCitizenVerificationRequest)))
 	mux.Handle("GET /citizens", protected(rbac.PermissionViewDept, srv.citizens))
 	mux.Handle("POST /issue", audited(rbac.PermissionIssue, actionIssue, srv.issue))
 	mux.Handle("POST /verify", audited(rbac.PermissionVerify, actionVerifyFile, srv.verify))

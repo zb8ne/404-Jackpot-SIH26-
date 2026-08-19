@@ -106,6 +106,50 @@ func TestConsentRequestIsDeliveredToCitizenInboxFor24Hours(t *testing.T) {
 	}
 }
 
+func TestCitizenInboxDecisionPersistsAcrossSessionsAndOfficialCompletes(t *testing.T) {
+	f := newConsentFixture(t, "OFFICIAL", "birth")
+	f.linkCredential(t, chain.DocBirthCertificate, true)
+	id := createRequest(t, f)
+	citizenID := "citizen-user"
+	if err := f.store.UpsertCitizenAccount(store.CitizenAccount{ID: "citizen-1", SupabaseUserID: &citizenID, DisplayName: "Citizen", Email: "citizen@example.test", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	newCitizenSession := func() http.Handler {
+		return newHandlerConfigured(f.registry, f.store, apiVerifier{user: &auth.User{ID: citizenID}}, "0xcontract", "http://web.test", f.notifications)
+	}
+	response := httptest.NewRecorder()
+	newCitizenSession().ServeHTTP(response, authorizedRequest(http.MethodPost, "/citizen/verification-requests/"+id+"/decision", bytes.NewBufferString(`{"decision":"APPROVED"}`), "application/json"))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"APPROVED"`) {
+		t.Fatalf("approve status=%d body=%s", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	newCitizenSession().ServeHTTP(response, authorizedRequest(http.MethodGet, "/citizen/verification-requests", nil, ""))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"APPROVED"`) {
+		t.Fatalf("persisted inbox status=%d body=%s", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	f.handler.ServeHTTP(response, authorizedRequest(http.MethodPost, "/verification-requests/"+id+"/complete", nil, ""))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"VALID"`) {
+		t.Fatalf("complete status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestCitizenCannotDecideAnotherCitizensRequest(t *testing.T) {
+	f := newConsentFixture(t, "OFFICIAL", "birth")
+	f.linkCredential(t, chain.DocBirthCertificate, true)
+	id := createRequest(t, f)
+	otherID := "other-user"
+	if err := f.store.UpsertCitizenAccount(store.CitizenAccount{ID: "citizen-2", SupabaseUserID: &otherID, DisplayName: "Other", Email: "other@example.test", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	handler := newHandlerConfigured(f.registry, f.store, apiVerifier{user: &auth.User{ID: otherID}}, "0xcontract", "http://web.test", f.notifications)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, authorizedRequest(http.MethodPost, "/citizen/verification-requests/"+id+"/decision", bytes.NewBufferString(`{"decision":"DENIED"}`), "application/json"))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("cross-citizen decision status=%d, want 404", response.Code)
+	}
+}
+
 func TestConsentRequestRejectsUnlinkedAndCrossDepartment(t *testing.T) {
 	f := newConsentFixture(t, "OFFICIAL", "birth")
 	f.linkCredential(t, chain.DocBirthCertificate, false)

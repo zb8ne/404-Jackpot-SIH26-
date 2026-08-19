@@ -164,6 +164,7 @@ Looking up the ID first would misclassify a genuine superseded original because 
 - `GET /consent/{token}`, `POST /consent/{token}/approve`, and `POST /consent/{token}/deny` (token-authenticated, no Supabase citizen login)
 - `GET /development/notifications/{id}` (authenticated/scoped in-memory demo email capture)
 - `GET /citizen/verification-requests` (authenticated citizen's ownership-scoped inbox)
+- `POST /citizen/verification-requests/{id}/decision` (atomic authenticated approve/deny)
 
 ## 4. AUTHENTICATION
 
@@ -279,7 +280,7 @@ The request lifecycle is:
 - `EXPIRED`
 - `COMPLETED`
 
-Citizens are separate from government `user_profiles`; `CITIZEN` is not an RBAC role. Citizen accounts require email and are provisioned with `backend/cmd/citizen-seed`. The optional unique `supabase_user_id` links a citizen account to Supabase Auth, and `CitizenAccountBySupabaseUserID` is the trusted lookup for authenticated citizen identity. `GET /account` resolves a verified Supabase identity against both profile tables, rejects missing/inactive or ambiguous dual-linked identities, and returns a discriminated `GOVERNMENT`/`CITIZEN` response. Routine reseeding without `-supabase-user-id` preserves an existing identity link. New consent requests are delivered only to the ownership-scoped web inbox and expire after 24 hours. Legacy token endpoints remain for pre-existing token-backed records, but new requests do not create or expose email links.
+Citizens are separate from government `user_profiles`; `CITIZEN` is not an RBAC role. Citizen accounts require email and are provisioned with `backend/cmd/citizen-seed`. The optional unique `supabase_user_id` links a citizen account to Supabase Auth, and `CitizenAccountBySupabaseUserID` is the trusted lookup for authenticated citizen identity. `GET /account` resolves a verified Supabase identity against both profile tables, rejects missing/inactive or ambiguous dual-linked identities, and returns a discriminated `GOVERNMENT`/`CITIZEN` response. Routine reseeding without `-supabase-user-id` preserves an existing identity link. New consent requests are delivered only to the ownership-scoped web inbox and expire after 24 hours. Citizen decisions are guarded atomic transitions keyed by both request and authenticated citizen account, persist across sessions, and commit with their audit event. Legacy token endpoints remain for pre-existing token-backed records, but new requests do not create or expose email links.
 
 `POST /verify` remains the authenticated file-possession authenticity check. Direct `GET /verify/{docId}` returns `409` for linked credentials so it cannot bypass consent; it remains compatible for old unlinked credentials. The QR frontend never calls direct ID verification.
 
