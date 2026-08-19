@@ -65,7 +65,8 @@ Needs Go 1.22+, Node 20+, and [Foundry](https://getfoundry.sh)
 The backend needs `SUPABASE_URL`; the frontend needs `VITE_SUPABASE_URL` and
 `VITE_SUPABASE_PUBLISHABLE_KEY`. `VITE_API_URL` overrides the backend address, and
 `PUBLIC_WEB_URL` (default `http://127.0.0.1:5173`) is the base URL embedded in new QR
-codes. There is no authentication bypass.
+codes. `PUBLIC_API_URL` (default `http://127.0.0.1:8088`) is embedded as the direct
+QR PNG download link. There is no authentication bypass.
 
 Credential operations need a Supabase user with a backend profile. The Compose
 `profiles` step provisions each non-empty department Admin ID independently from

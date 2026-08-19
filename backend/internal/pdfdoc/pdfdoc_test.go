@@ -90,7 +90,7 @@ func TestStampIsDeterministic(t *testing.T) {
 func TestStampWithConfiguredVerificationURLPreservesMarker(t *testing.T) {
 	orig := Render("BIRTH CERTIFICATE", []string{"Name: Citizen"})
 	verificationURL := "http://127.0.0.1:5173/verify?docId=BC-2026-ABC123"
-	downloadURL := "http://127.0.0.1:5173/qr-download?docId=BC-2026-ABC123"
+	downloadURL := "http://127.0.0.1:8088/qr/BC-2026-ABC123/download.png"
 	stamped, visible := StampWithQRDownload(orig, "BC-2026-ABC123", verificationURL, downloadURL)
 	if !visible {
 		t.Fatal("expected visible registry page")

@@ -154,6 +154,7 @@ services:
       RPC_URL: http://anvil:8545
       SUPABASE_URL: ${SUPABASE_URL:?set SUPABASE_URL (the Supabase project URL)}
       PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://127.0.0.1:5173}
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://127.0.0.1:${API_PORT:-8088}}
     restart: unless-stopped
 
   # One-shot: seed demo documents when all three Admin tokens are available.

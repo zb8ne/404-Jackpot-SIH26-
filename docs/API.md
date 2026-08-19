@@ -245,7 +245,7 @@ All four operation families create Phase 2 audit records. A valid negative verif
 
 Purpose: stamp, hash, anchor, and store a new credential. Authentication: required. Roles: Admin or Official. Scope: caller department.
 
-For PDFs that support the visible registry-page path, the stamped page contains the vector QR plus an embedded PNG attachment named `<document-id>-qr.png`. Its visible “Download QR PNG” label is also a standard web link to `/qr-download?docId=...`, because many browser PDF viewers ignore file attachments. The PNG encodes the same verification URL, and both annotations are included before the stamped PDF hash is anchored. Fallback-stamped PDFs cannot carry the visible page or download controls.
+For PDFs that support the visible registry-page path, the stamped page contains the vector QR plus an embedded PNG attachment named `<document-id>-qr.png`. Its visible “Download QR PNG” label links directly to `{PUBLIC_API_URL}/qr/{docId}/download.png`, because many browser PDF viewers ignore file attachments. The PNG encodes the same verification URL, and both annotations are included before the stamped PDF hash is anchored. Fallback-stamped PDFs cannot carry the visible page or download controls.
 
 Multipart form-data:
 

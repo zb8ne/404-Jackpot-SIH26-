@@ -40,7 +40,7 @@ func newConsentFixture(t *testing.T, role, department string) consentFixture {
 	}
 	registry := &apiRegistry{records: map[[32]byte]chain.Record{}, current: map[string][32]byte{}}
 	notifications := newDevelopmentNotifier()
-	handler := newHandlerConfigured(registry, s, apiVerifier{user: &auth.User{ID: "user-1"}}, "0xcontract", "http://web.test", notifications)
+	handler := newHandlerConfigured(registry, s, apiVerifier{user: &auth.User{ID: "user-1"}}, "0xcontract", "http://web.test", "http://api.test", notifications)
 	return consentFixture{handler, s, registry, notifications}
 }
 
@@ -98,7 +98,7 @@ func TestConsentRequestIsDeliveredToCitizenInboxFor24Hours(t *testing.T) {
 	if err := f.store.UpsertCitizenAccount(store.CitizenAccount{ID: "citizen-1", SupabaseUserID: &citizenID, DisplayName: "Citizen", Email: "citizen@example.test", Active: true}); err != nil {
 		t.Fatal(err)
 	}
-	citizenHandler := newHandlerConfigured(f.registry, f.store, apiVerifier{user: &auth.User{ID: citizenID}}, "0xcontract", "http://web.test", f.notifications)
+	citizenHandler := newHandlerConfigured(f.registry, f.store, apiVerifier{user: &auth.User{ID: citizenID}}, "0xcontract", "http://web.test", "http://api.test", f.notifications)
 	response := httptest.NewRecorder()
 	citizenHandler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/citizen/verification-requests", nil, ""))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), id) || !strings.Contains(response.Body.String(), `"notificationStatus":"SUCCEEDED"`) {
@@ -115,7 +115,7 @@ func TestCitizenInboxDecisionPersistsAcrossSessionsAndOfficialCompletes(t *testi
 		t.Fatal(err)
 	}
 	newCitizenSession := func() http.Handler {
-		return newHandlerConfigured(f.registry, f.store, apiVerifier{user: &auth.User{ID: citizenID}}, "0xcontract", "http://web.test", f.notifications)
+		return newHandlerConfigured(f.registry, f.store, apiVerifier{user: &auth.User{ID: citizenID}}, "0xcontract", "http://web.test", "http://api.test", f.notifications)
 	}
 	response := httptest.NewRecorder()
 	newCitizenSession().ServeHTTP(response, authorizedRequest(http.MethodPost, "/citizen/verification-requests/"+id+"/decision", bytes.NewBufferString(`{"decision":"APPROVED"}`), "application/json"))
@@ -142,7 +142,7 @@ func TestCitizenCannotDecideAnotherCitizensRequest(t *testing.T) {
 	if err := f.store.UpsertCitizenAccount(store.CitizenAccount{ID: "citizen-2", SupabaseUserID: &otherID, DisplayName: "Other", Email: "other@example.test", Active: true}); err != nil {
 		t.Fatal(err)
 	}
-	handler := newHandlerConfigured(f.registry, f.store, apiVerifier{user: &auth.User{ID: otherID}}, "0xcontract", "http://web.test", f.notifications)
+	handler := newHandlerConfigured(f.registry, f.store, apiVerifier{user: &auth.User{ID: otherID}}, "0xcontract", "http://web.test", "http://api.test", f.notifications)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, authorizedRequest(http.MethodPost, "/citizen/verification-requests/"+id+"/decision", bytes.NewBufferString(`{"decision":"DENIED"}`), "application/json"))
 	if response.Code != http.StatusNotFound {

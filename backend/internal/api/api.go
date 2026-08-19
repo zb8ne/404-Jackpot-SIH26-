@@ -46,20 +46,21 @@ type Server struct {
 	store           *store.Store
 	contractAddress string
 	publicWebURL    string
+	publicAPIURL    string
 	notifications   notifier
 }
 
-func New(c *chain.Client, s *store.Store, verifier auth.TokenVerifier, publicWebURL string) http.Handler {
-	return newHandlerConfigured(c, s, verifier, c.Address.Hex(), publicWebURL, newDevelopmentNotifier())
+func New(c *chain.Client, s *store.Store, verifier auth.TokenVerifier, publicWebURL, publicAPIURL string) http.Handler {
+	return newHandlerConfigured(c, s, verifier, c.Address.Hex(), publicWebURL, publicAPIURL, newDevelopmentNotifier())
 }
 
 func newHandler(c registry, s *store.Store, verifier auth.TokenVerifier, contractAddress string) http.Handler {
-	return newHandlerConfigured(c, s, verifier, contractAddress, "http://127.0.0.1:5173", newDevelopmentNotifier())
+	return newHandlerConfigured(c, s, verifier, contractAddress, "http://127.0.0.1:5173", "http://127.0.0.1:8088", newDevelopmentNotifier())
 }
 
-func newHandlerConfigured(c registry, s *store.Store, verifier auth.TokenVerifier, contractAddress, publicWebURL string, notifications notifier) http.Handler {
+func newHandlerConfigured(c registry, s *store.Store, verifier auth.TokenVerifier, contractAddress, publicWebURL, publicAPIURL string, notifications notifier) http.Handler {
 
-	srv := &Server{chain: c, reader: c, store: s, contractAddress: contractAddress, publicWebURL: strings.TrimRight(publicWebURL, "/"), notifications: notifications}
+	srv := &Server{chain: c, reader: c, store: s, contractAddress: contractAddress, publicWebURL: strings.TrimRight(publicWebURL, "/"), publicAPIURL: strings.TrimRight(publicAPIURL, "/"), notifications: notifications}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", srv.health)
@@ -398,7 +399,7 @@ func (s *Server) verificationURL(docID string) string {
 }
 
 func (s *Server) qrDownloadURL(docID string) string {
-	return s.publicWebURL + "/qr-download?docId=" + url.QueryEscape(docID)
+	return s.publicAPIURL + "/qr/" + url.PathEscape(docID) + "/download.png"
 }
 
 func (s *Server) qrPNG(w http.ResponseWriter, r *http.Request) {
