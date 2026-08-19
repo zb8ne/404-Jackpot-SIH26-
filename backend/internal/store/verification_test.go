@@ -84,6 +84,51 @@ func TestConsentDecisionIsAtomicAndSinglePurpose(t *testing.T) {
 	}
 }
 
+func TestCitizenInboxDecisionEnforcesOwnerIdempotencyAndExpiry(t *testing.T) {
+	event := AuditEvent{Actor: AuditActor{ID: "citizen:citizen-1", Role: "CITIZEN_CONSENT"}, Action: "CONSENT_APPROVED", Outcome: "SUCCESS", Result: "APPROVED", HTTPStatus: 200}
+	s := openTestStore(t)
+	seedVerificationRequest(t, s, time.Now().UTC().Add(time.Hour))
+	if _, err := s.DecideCitizenRequest("request-1", "citizen-2", "APPROVED", event); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-owner error=%v, want ErrNotFound", err)
+	}
+	req, err := s.DecideCitizenRequest("request-1", "citizen-1", "APPROVED", event)
+	if err != nil || req.State != "APPROVED" || req.DecisionChannel == nil || *req.DecisionChannel != "WEB_INBOX" {
+		t.Fatalf("approved request=%#v err=%v", req, err)
+	}
+	if _, err := s.DecideCitizenRequest("request-1", "citizen-1", "APPROVED", event); err != nil {
+		t.Fatalf("identical decision should be idempotent: %v", err)
+	}
+	if _, err := s.DecideCitizenRequest("request-1", "citizen-1", "DENIED", event); !errors.Is(err, ErrConflict) {
+		t.Fatalf("conflicting decision error=%v", err)
+	}
+
+	expired := openTestStore(t)
+	seedVerificationRequest(t, expired, time.Now().UTC().Add(-time.Minute))
+	if _, err := expired.DecideCitizenRequest("request-1", "citizen-1", "APPROVED", event); !errors.Is(err, ErrExpired) {
+		t.Fatalf("expired decision error=%v", err)
+	}
+	stored, _ := expired.VerificationRequestByID("request-1")
+	if stored.State != "EXPIRED" {
+		t.Fatalf("expired state=%s", stored.State)
+	}
+}
+
+func TestCitizenInboxDecisionRollsBackWhenAuditFails(t *testing.T) {
+	s := openTestStore(t)
+	seedVerificationRequest(t, s, time.Now().UTC().Add(time.Hour))
+	if _, err := s.db.Exec(`CREATE TRIGGER fail_inbox_audit BEFORE INSERT ON audit_logs WHEN NEW.action='CONSENT_APPROVED' BEGIN SELECT RAISE(FAIL,'audit failed'); END`); err != nil {
+		t.Fatal(err)
+	}
+	event := AuditEvent{Actor: AuditActor{ID: "citizen:citizen-1", Role: "CITIZEN_CONSENT"}, Action: "CONSENT_APPROVED", Outcome: "SUCCESS", Result: "APPROVED", HTTPStatus: 200}
+	if _, err := s.DecideCitizenRequest("request-1", "citizen-1", "APPROVED", event); err == nil {
+		t.Fatal("expected audit failure")
+	}
+	req, err := s.VerificationRequestByID("request-1")
+	if err != nil || req.State != "PENDING" {
+		t.Fatalf("decision was not rolled back: request=%#v err=%v", req, err)
+	}
+}
+
 func TestConsentRollsBackWhenAuditFails(t *testing.T) {
 	s := openTestStore(t)
 	seedVerificationRequest(t, s, time.Now().UTC().Add(time.Hour))

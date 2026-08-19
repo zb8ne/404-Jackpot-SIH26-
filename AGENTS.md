@@ -396,6 +396,7 @@ Do not invent response fields or endpoints. If the frontend needs a role, depart
 - Verification verdict state machine with Go tests.
 - SQLite document/PDF storage, citizen lookup, credential listing, and download.
 - Authenticated citizen dashboard with Supabase-identity-derived credential listing and ownership-checked stamped-PDF downloads.
+- Regression coverage enforces citizen/government route separation, cross-citizen request/download denial, inbox decision idempotency and expiry, and transactional rollback when decision audit logging fails.
 - Issue, verify, supersede, and revoke backend handlers.
 - Verify, Issue, Citizen, and Login frontend screens.
 - Supabase email/password login and session handling.

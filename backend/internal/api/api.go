@@ -890,10 +890,8 @@ func (s *Server) authenticatedCitizen(w http.ResponseWriter, r *http.Request) (s
 		writeErr(w, http.StatusInternalServerError, "authenticated user missing from context")
 		return store.CitizenAccount{}, false
 	}
-	if _, err := s.store.UserProfileByID(user.ID); err == nil {
-		writeErr(w, http.StatusConflict, "identity is linked to both government and citizen accounts")
-		return store.CitizenAccount{}, false
-	} else if !errors.Is(err, store.ErrNotFound) {
+	_, governmentErr := s.store.UserProfileByID(user.ID)
+	if governmentErr != nil && !errors.Is(governmentErr, store.ErrNotFound) {
 		writeErr(w, http.StatusInternalServerError, "could not load application account")
 		return store.CitizenAccount{}, false
 	}
@@ -904,6 +902,10 @@ func (s *Server) authenticatedCitizen(w http.ResponseWriter, r *http.Request) (s
 	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not load citizen account")
+		return store.CitizenAccount{}, false
+	}
+	if governmentErr == nil {
+		writeErr(w, http.StatusConflict, "identity is linked to both government and citizen accounts")
 		return store.CitizenAccount{}, false
 	}
 	if !account.Active {

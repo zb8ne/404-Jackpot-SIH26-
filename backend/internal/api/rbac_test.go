@@ -325,6 +325,17 @@ func TestMeUsesBackendOwnedProfile(t *testing.T) {
 	}
 }
 
+func TestGovernmentProfileCannotUseCitizenOwnedRoutes(t *testing.T) {
+	handler := rbacHandler(t, "ADMIN", "birth")
+	for _, path := range []string{"/citizen/credentials", "/citizen/verification-requests"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, authorizedRequest(http.MethodGet, path, nil, ""))
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("GET %s status=%d, want 403", path, response.Code)
+		}
+	}
+}
+
 func TestAccountResolvesGovernmentProfile(t *testing.T) {
 	handler := rbacHandler(t, "ADMIN", "birth")
 	response := httptest.NewRecorder()
@@ -444,6 +455,11 @@ func TestCitizenCanOnlyReadAndDownloadOwnCredentials(t *testing.T) {
 	anchored[31] = 1
 	registry.records[anchored] = chain.Record{Found: true, DocID: "OWN-1", Status: chain.StatusValid}
 	handler := newHandler(registry, s, apiVerifier{user: &auth.User{ID: supabaseID}}, "0xcontract")
+	governmentResponse := httptest.NewRecorder()
+	handler.ServeHTTP(governmentResponse, authorizedRequest(http.MethodGet, "/department/credentials", nil, ""))
+	if governmentResponse.Code != http.StatusForbidden {
+		t.Fatalf("citizen government-route status=%d, want 403", governmentResponse.Code)
+	}
 
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/citizen/credentials", nil, ""))
