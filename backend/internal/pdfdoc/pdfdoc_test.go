@@ -90,7 +90,8 @@ func TestStampIsDeterministic(t *testing.T) {
 func TestStampWithConfiguredVerificationURLPreservesMarker(t *testing.T) {
 	orig := Render("BIRTH CERTIFICATE", []string{"Name: Citizen"})
 	verificationURL := "http://127.0.0.1:5173/verify?docId=BC-2026-ABC123"
-	stamped, visible := StampWithQR(orig, "BC-2026-ABC123", verificationURL)
+	downloadURL := "http://127.0.0.1:5173/qr-download?docId=BC-2026-ABC123"
+	stamped, visible := StampWithQRDownload(orig, "BC-2026-ABC123", verificationURL, downloadURL)
 	if !visible {
 		t.Fatal("expected visible registry page")
 	}
@@ -108,6 +109,9 @@ func TestStampWithConfiguredVerificationURLPreservesMarker(t *testing.T) {
 		!bytes.Contains(stamped, []byte("BC-2026-ABC123-qr.png")) ||
 		!bytes.Contains(stamped, []byte("\x89PNG\r\n\x1a\n")) {
 		t.Fatal("registry page did not embed a downloadable QR PNG attachment")
+	}
+	if !bytes.Contains(stamped, []byte("/Subtype /Link")) || !bytes.Contains(stamped, []byte(escape(downloadURL))) {
+		t.Fatal("registry page did not include the browser-compatible QR download link")
 	}
 }
 

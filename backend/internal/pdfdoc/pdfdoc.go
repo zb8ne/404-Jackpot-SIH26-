@@ -88,7 +88,14 @@ func Stamp(orig []byte, docID string) (stamped []byte, visible bool) {
 // issued credentials to carry an explicit verification URL in their QR code.
 // Stamp remains the compatibility path for older bare-document-ID QR values.
 func StampWithQR(orig []byte, docID, qrPayload string) (stamped []byte, visible bool) {
-	out, err := appendRegistryPage(orig, docID, qrPayload)
+	return StampWithQRDownload(orig, docID, qrPayload, "")
+}
+
+// StampWithQRDownload adds a normal web link over the visible download label
+// in addition to the embedded attachment. Browser PDF viewers often ignore
+// FileAttachment annotations, while URI links are broadly supported.
+func StampWithQRDownload(orig []byte, docID, qrPayload, qrDownloadURL string) (stamped []byte, visible bool) {
+	out, err := appendRegistryPage(orig, docID, qrPayload, qrDownloadURL)
 	if err != nil {
 		return appendMarkerComment(orig, docID), false
 	}
@@ -106,7 +113,7 @@ func appendMarkerComment(orig []byte, docID string) []byte {
 	return append(out, []byte("%"+docid.Marker+docID+"\n")...)
 }
 
-func appendRegistryPage(orig []byte, docID, qrPayload string) ([]byte, error) {
+func appendRegistryPage(orig []byte, docID, qrPayload, qrDownloadURL string) ([]byte, error) {
 	// Where the current cross-reference table starts; the new one chains to it.
 	sx := reStartXref.FindAllSubmatch(orig, -1)
 	if len(sx) == 0 {
@@ -162,7 +169,7 @@ func appendRegistryPage(orig []byte, docID, qrPayload string) ([]byte, error) {
 	if maxObj == 0 {
 		return nil, fmt.Errorf("no objects found")
 	}
-	fontNum, contentNum, embeddedQRNum, fileSpecNum, attachmentNum, pageNum := maxObj+1, maxObj+2, maxObj+3, maxObj+4, maxObj+5, maxObj+6
+	fontNum, contentNum, embeddedQRNum, fileSpecNum, attachmentNum, linkNum, pageNum := maxObj+1, maxObj+2, maxObj+3, maxObj+4, maxObj+5, maxObj+6, maxObj+7
 
 	// Rewrite the page tree in place, keeping every other key it carries.
 	newKids := strings.TrimSpace(pagesBody[kids[2]:kids[3]]) + fmt.Sprintf(" %d 0 R", pageNum)
@@ -204,11 +211,16 @@ func appendRegistryPage(orig []byte, docID, qrPayload string) ([]byte, error) {
 	write(contentNum, fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream))
 	write(embeddedQRNum, fmt.Sprintf("<< /Type /EmbeddedFile /Subtype /image#2Fpng /Length %d >>\nstream\n%s\nendstream", len(qrPNG), string(qrPNG)))
 	write(fileSpecNum, fmt.Sprintf("<< /Type /Filespec /F (%s) /UF (%s) /Desc (Credential verification QR code) /EF << /F %d 0 R /UF %d 0 R >> >>", escape(qrFilename), escape(qrFilename), embeddedQRNum, embeddedQRNum))
-	write(attachmentNum, fmt.Sprintf("<< /Type /Annot /Subtype /FileAttachment /Rect [72 414 250 448] /Contents (Download QR PNG) /FS %d 0 R /Name /Paperclip >>", fileSpecNum))
+	write(attachmentNum, fmt.Sprintf("<< /Type /Annot /Subtype /FileAttachment /Rect [72 418 98 444] /Contents (Download QR PNG) /FS %d 0 R /Name /Paperclip >>", fileSpecNum))
+	annots := fmt.Sprintf("[%d 0 R]", attachmentNum)
+	if qrDownloadURL != "" {
+		write(linkNum, fmt.Sprintf("<< /Type /Annot /Subtype /Link /Rect [100 414 350 448] /Border [0 0 0] /A << /S /URI /URI (%s) >> >>", escape(qrDownloadURL)))
+		annots = fmt.Sprintf("[%d 0 R %d 0 R]", attachmentNum, linkNum)
+	}
 	write(pageNum, fmt.Sprintf(
 		"<< /Type /Page /Parent %s 0 R /MediaBox [0 0 612 792] "+
-			"/Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R /Annots [%d 0 R] >>",
-		pagesNum, fontNum, contentNum, attachmentNum))
+			"/Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R /Annots %s >>",
+		pagesNum, fontNum, contentNum, annots))
 
 	// Cross-reference entries must be written in ascending object order, grouped
 	// into contiguous subsections.

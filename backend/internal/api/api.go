@@ -14,6 +14,8 @@ import (
 	"net/url"
 	"strings"
 
+	qrcode "github.com/skip2/go-qrcode"
+
 	"credreg/backend/internal/auth"
 	"credreg/backend/internal/chain"
 	"credreg/backend/internal/docid"
@@ -62,6 +64,7 @@ func newHandlerConfigured(c registry, s *store.Store, verifier auth.TokenVerifie
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", srv.health)
 	mux.HandleFunc("GET /departments", srv.departments)
+	mux.HandleFunc("GET /qr/{docId}/download.png", srv.qrPNG)
 
 	authenticated := func(next http.Handler) http.Handler {
 		return auth.Middleware(verifier)(rbac.LoadProfile(s)(next))
@@ -351,7 +354,7 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 	// Stamp first, then hash. The citizen walks away with the stamped file, so
 	// the stamped bytes are the ones the chain has to know about — hashing the
 	// upload as it arrived would anchor a document nobody holds.
-	stamped, marked := pdfdoc.StampWithQR(pdf, docID, s.verificationURL(docID))
+	stamped, marked := pdfdoc.StampWithQRDownload(pdf, docID, s.verificationURL(docID), s.qrDownloadURL(docID))
 	sum := sha256.Sum256(stamped)
 	docHash := "0x" + hex.EncodeToString(sum[:])
 	audit.DocHash = docHash
@@ -392,6 +395,40 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) verificationURL(docID string) string {
 	return s.publicWebURL + "/verify?docId=" + url.QueryEscape(docID)
+}
+
+func (s *Server) qrDownloadURL(docID string) string {
+	return s.publicWebURL + "/qr-download?docId=" + url.QueryEscape(docID)
+}
+
+func (s *Server) qrPNG(w http.ResponseWriter, r *http.Request) {
+	docID := strings.TrimSpace(r.PathValue("docId"))
+	document, found, err := s.store.ByDocumentID(docID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load credential")
+		return
+	}
+	if !found {
+		writeErr(w, http.StatusNotFound, "credential not found")
+		return
+	}
+	png, err := qrcode.Encode(s.verificationURL(document.DocID), qrcode.Medium, 512)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not generate QR code")
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, safeDownloadFilename(document.DocID)+"-qr.png"))
+	w.Write(png)
+}
+
+func safeDownloadFilename(value string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, value)
 }
 
 // zeroHash is what an unknown docId resolves to, and what we report as the
@@ -729,7 +766,7 @@ func (s *Server) supersede(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stamped, marked := pdfdoc.StampWithQR(pdf, docID, s.verificationURL(docID))
+	stamped, marked := pdfdoc.StampWithQRDownload(pdf, docID, s.verificationURL(docID), s.qrDownloadURL(docID))
 	sum := sha256.Sum256(stamped)
 	newHash := "0x" + hex.EncodeToString(sum[:])
 	audit.DocHash = newHash

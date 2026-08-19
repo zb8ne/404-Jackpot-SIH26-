@@ -83,7 +83,7 @@ Do not reverse or bypass this ordering. The citizen's stamped copy must be the e
 - `backend/internal/docid/docid.go` defines and extracts `CREDREG-DOCID:<docId>`.
 - `backend/internal/pdfdoc/pdfdoc.go` appends a registry page using a PDF incremental update, leaving original bytes untouched.
 - The page includes a vector QR and visible marker.
-- The registry page also embeds the same QR as a PNG file attachment named `<document-id>-qr.png`, with a visible attachment prompt. The attachment is part of the stamped bytes before hashing and anchoring.
+- The registry page embeds the same QR as a PNG attachment named `<document-id>-qr.png` and overlays the visible “Download QR PNG” label with a normal link to `/qr-download?docId=...`. The web route downloads from the public issued-credential QR endpoint, covering browser PDF viewers that ignore attachments. Both annotations are part of the stamped bytes before hashing and anchoring.
 - If the simple PDF parser cannot handle a file, stamping falls back to a trailing PDF comment containing the marker.
 - New credentials encode `{PUBLIC_WEB_URL}/verify?docId=...`; legacy `Stamp` and existing PDFs retain bare document-ID compatibility.
 - PDF behavior is covered by `backend/internal/pdfdoc/pdfdoc_test.go`.
@@ -147,6 +147,7 @@ Looking up the ID first would misclassify a genuine superseded original because 
 
 - `GET /health`
 - `GET /departments`
+- `GET /qr/{docId}/download.png` (public PNG for an issued credential)
 - `GET /citizens`
 - `POST /issue`
 - `POST /verify`

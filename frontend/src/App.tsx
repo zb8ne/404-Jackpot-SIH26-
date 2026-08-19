@@ -15,6 +15,7 @@ import { AppShell, type ShellTab } from './components/AppShell'
 import { CitizenDashboard } from './screens/CitizenDashboard'
 import { CitizenInbox } from './screens/CitizenInbox'
 import { GovernmentRequests } from './screens/GovernmentRequests'
+import { QRDownload } from './screens/QRDownload'
 
 // Pixi + the scene engine are a lot of bytes for a form-filling app to load up
 // front; only the account holders who actually see live activity pay for it.
@@ -35,6 +36,7 @@ export default function App() {
 	// The demo floor is a standalone page: no login, so it can be projected or
 	// handed to a judge without an account.
 	const isDemo = window.location.pathname === '/demo'
+  const qrDownloadDocumentId = window.location.pathname === '/qr-download' ? new URLSearchParams(window.location.search).get('docId') ?? '' : ''
   const [session, setSession] = useState<any>(null)
   const [tab, setTab] = useState<ShellTab>('verify')
   const [contract, setContract] = useState('')
@@ -103,6 +105,10 @@ export default function App() {
         <Demo />
       </Suspense>
     )
+  }
+
+  if (qrDownloadDocumentId) {
+    return <QRDownload documentId={qrDownloadDocumentId} />
   }
 
   if (consentToken) {

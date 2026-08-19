@@ -185,3 +185,16 @@ func TestLinkedDirectIDVerificationRequiresConsent(t *testing.T) {
 		t.Fatalf("direct linked verify=%d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestQRPNGDownloadIsPublicForIssuedCredential(t *testing.T) {
+	f := newConsentFixture(t, "OFFICIAL", "birth")
+	f.linkCredential(t, chain.DocBirthCertificate, true)
+	response := httptest.NewRecorder()
+	f.handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/qr/DOC-1/download.png", nil))
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "image/png" || !bytes.HasPrefix(response.Body.Bytes(), []byte("\x89PNG\r\n\x1a\n")) {
+		t.Fatalf("QR download status=%d type=%q body-prefix=%q", response.Code, response.Header().Get("Content-Type"), response.Body.Bytes()[:min(8, response.Body.Len())])
+	}
+	if !strings.Contains(response.Header().Get("Content-Disposition"), "DOC-1-qr.png") {
+		t.Fatalf("content disposition=%q", response.Header().Get("Content-Disposition"))
+	}
+}
