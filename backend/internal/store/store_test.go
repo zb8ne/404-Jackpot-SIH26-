@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 )
@@ -51,6 +52,45 @@ func TestDefaultDepartmentsAreStableAndRenameSurvivesOpen(t *testing.T) {
 	}
 	if birth.DisplayName != "Civil Registration" {
 		t.Fatalf("display name was overwritten: %q", birth.DisplayName)
+	}
+}
+
+func TestOpenMigratesCitizenSupabaseIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE citizen_accounts (
+		  id TEXT PRIMARY KEY,
+		  display_name TEXT NOT NULL,
+		  email TEXT NOT NULL,
+		  phone TEXT,
+		  active INTEGER NOT NULL DEFAULT 1,
+		  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+		  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+		)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	supabaseID := "supabase-citizen-1"
+	if err := s.UpsertCitizenAccount(CitizenAccount{
+		ID: "citizen-1", SupabaseUserID: &supabaseID,
+		DisplayName: "Citizen", Email: "citizen@example.test", Active: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.CitizenAccountBySupabaseUserID(supabaseID); err != nil || got.ID != "citizen-1" {
+		t.Fatalf("migrated account=%#v err=%v", got, err)
 	}
 }
 

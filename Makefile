@@ -86,7 +86,7 @@ deploy:
 ## backend: start the REST API in the background
 backend:
 	@mkdir -p $(RUN)
-	@cd $(BACKEND) && PUBLIC_WEB_URL=$(WEB_URL) setsid --fork ../bin/server < /dev/null > ../$(RUN)/backend.log 2>&1 & echo $$! > $(RUN)/backend.pid
+	@cd $(BACKEND) && PUBLIC_WEB_URL=$(WEB_URL) PUBLIC_API_URL=$(API_URL) setsid --fork ../bin/server < /dev/null > ../$(RUN)/backend.log 2>&1 & echo $$! > $(RUN)/backend.pid
 	@echo "waiting for the backend..."
 	@for i in $$(seq 1 100); do \
 		curl -sf $(API_URL)/health >/dev/null 2>&1 && break; \

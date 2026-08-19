@@ -22,6 +22,7 @@ export function Issue() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState<IssueResult | null>(null)
+  const [copied, setCopied] = useState('')
 
   useEffect(() => {
     Promise.all([getDepartments(), getMe(), getCitizenAccounts()])
@@ -81,6 +82,16 @@ function generateDocId() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function copy(label: string, value: string) {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(label)
+      window.setTimeout(() => setCopied(''), 1800)
+    } catch {
+      setError(`Could not copy ${label.toLowerCase()}`)
     }
   }
 
@@ -186,19 +197,22 @@ function generateDocId() {
           <div className="rounded-2xl border-2 border-emerald-500/60 bg-emerald-500/10 p-6">
             <h3 className="text-2xl font-bold text-emerald-400">Issued and anchored</h3>
             <dl className="mt-5 space-y-4">
-              <Row label="Document id" value={<span className="font-mono">{result.docId}</span>} />
+              <CopyRow label="Document id" value={result.docId} display={result.docId} copied={copied} onCopy={copy} />
               <Row label="Holder" value={result.citizen} />
               <Row label="Issuer" value={result.issuer} />
-              <Row label="Anchored hash" value={<Hash value={result.docHash} />} />
-              <Row label="Transaction" value={<Hash value={result.txHash} />} />
+              <CopyRow label="Anchored hash" value={result.docHash} display={<Hash value={result.docHash} />} copied={copied} onCopy={copy} />
+              <CopyRow label="Transaction" value={result.txHash} display={<Hash value={result.txHash} />} copied={copied} onCopy={copy} />
             </dl>
-            <button
-              type="button"
-              onClick={() => void downloadDocument(result.downloadUrl, `${result.docId}.pdf`).catch((e) => setError(String(e)))}
-              className="mt-6 inline-block rounded-lg bg-emerald-500/20 px-5 py-3 font-semibold text-emerald-100 transition hover:bg-emerald-500/30"
-            >
-              Download the stamped PDF ↓
-            </button>
+            <div className="mt-6 rounded-xl border border-emerald-500/30 bg-slate-950/30 p-4">
+              <p className="text-sm text-emerald-100">The downloaded PDF is the exact stamped byte sequence anchored by the hash above.</p>
+              <button
+                type="button"
+                onClick={() => void downloadDocument(result.downloadUrl, `${result.docId}-stamped.pdf`).catch((e) => setError(String(e)))}
+                className="mt-4 w-full rounded-lg bg-emerald-500/20 px-5 py-3 font-semibold text-emerald-100 transition hover:bg-emerald-500/30"
+              >
+                Download stamped PDF
+              </button>
+            </div>
             {!result.stamped && (
               <p className="mt-4 text-sm text-amber-300">
                 This PDF's structure could not be extended, so the marker was appended as a comment
@@ -248,3 +262,7 @@ const Row = ({ label, value }: { label: string; value: React.ReactNode }) => (
     <dd className="text-right text-slate-100">{value}</dd>
   </div>
 )
+
+function CopyRow({ label, value, display, copied, onCopy }: { label: string; value: string; display: React.ReactNode; copied: string; onCopy: (label: string, value: string) => Promise<void> }) {
+  return <div className="flex items-center justify-between gap-4"><dt className="text-sm text-emerald-200/60">{label}</dt><dd className="flex items-center gap-3 text-right text-slate-100"><span className="font-mono">{display}</span><button type="button" onClick={() => void onCopy(label, value)} className="rounded border border-emerald-500/30 px-2 py-1 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/10">{copied === label ? 'Copied' : 'Copy'}</button></dd></div>
+}

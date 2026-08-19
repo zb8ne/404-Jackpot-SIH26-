@@ -8,7 +8,9 @@ This file preserves repository context for future Codex sessions. Treat the chec
 
 Verification distinguishes an authentic current document from an authentic superseded or revoked document, a modified document, and a document that was never issued. Superseding adds a replacement without deleting the original, preserving credential history.
 
-The repository is currently a local demo built around Anvil. Phase 1 Supabase/RBAC, Phase 2 audit/monitoring, and Phase 3 QR-based citizen-consent verification are implemented.
+The repository is a demo built around Anvil. Phase 1 Supabase/RBAC, Phase 2 audit/monitoring, Phase 3 QR-started citizen consent, and the authenticated citizen-portal flow are implemented. It can run locally as a Docker Compose stack or directly on the host, and it includes container/Vercel configuration for hosted demonstrations.
+
+This guide currently describes the cumulative `feature/citizen-portal-flow` branch in the user's fork, based on the Demo UI line of development.
 
 ## 2. CURRENT ARCHITECTURE
 
@@ -16,9 +18,13 @@ The repository is currently a local demo built around Anvil. Phase 1 Supabase/RB
 
 - React 19 + TypeScript, built with Vite and styled with Tailwind CSS.
 - Entry point: `frontend/src/main.tsx`; application shell: `frontend/src/App.tsx`.
+- `frontend/src/components/AppShell.tsx` owns account-aware workspace chrome and the navigation set for Controller, Admin, Official, and Citizen sessions.
 - There is currently no router. The application switches between tabs in `App.tsx`.
 - Supabase client setup is in `frontend/src/lib/supabase.ts`.
 - Backend request functions and shared response types, including `/health`, are centralized in `frontend/src/api.ts`.
+- `/demo` is selected through pathname handling in `App.tsx` and lazy-loads `frontend/src/screens/Demo.tsx`; it is not a React Router route.
+- The Demo UI uses PixiJS 8 and the scene implementation under `frontend/src/scene/`. The authenticated application lazy-loads a collapsible `LiveFloor`; `/demo` provides a standalone guided/projector view that can also run without authentication in preview mode.
+- `frontend/vercel.json` builds the Vite application and rewrites all paths to `index.html`, which preserves the pathname-based `/demo`, `/verify`, and `/consent/...` entry points on Vercel.
 
 ### Backend
 
@@ -40,6 +46,14 @@ SQLite stores stamped PDFs and metadata, stable departments, government profiles
 
 `contracts/src/CredentialRegistry.sol` stores credential hashes and lifecycle state. Foundry tests are in `contracts/test/CredentialRegistry.t.sol`; deployment is in `contracts/script/Deploy.s.sol`. The demo uses local Anvil accounts and keys currently embedded in the Go chain package.
 
+### Runtime and deployment topology
+
+- `docker-compose.yml` is the preferred local path. It starts Anvil, deploys the contract, provisions configured profiles plus demo citizens, starts the backend, conditionally seeds documents through the authenticated REST API, and starts the Vite frontend.
+- Doppler is only an environment-injection mechanism in this repository: `doppler run -- docker compose up` supplies the same variables that a local untracked `.env` file can supply. There is no committed Doppler project configuration or runtime dependency in application code.
+- `backend/Dockerfile` and `frontend/Dockerfile` build the split local Compose services.
+- The root `Dockerfile` plus `deploy/standalone/start.sh` are a standalone hosted-backend target used for Railway-style deployment. One container starts a loopback-only Anvil node, restores/persists its state under `DATA_DIR`, deploys the registry on first boot, and then starts the Go server. A persistent volume is required if chain and SQLite state must survive replacement/restart.
+- The backend honors a platform-provided `PORT` before `ADDR`. The root standalone image exposes `8088`, but the effective listener may be assigned by the hosting platform.
+
 ### Current interaction
 
 1. The frontend signs a user into Supabase and receives a session.
@@ -49,7 +63,8 @@ SQLite stores stamped PDFs and metadata, stable departments, government profiles
 5. The backend stores stamped PDFs and off-chain metadata in SQLite.
 6. Verification reads the authoritative hash/status from the contract and supplements it with SQLite metadata when available.
 7. Important credential operations and profile authorization changes append hash-chained SQLite audit events with the human actor, department, outcome, and relevant credential/transaction references.
-8. A QR verification URL leads an authenticated Admin/Official into a one-time request. The citizen approves or denies through an expiring email token; approved completion rereads the requested hash's current Solidity status.
+8. A QR verification URL leads an authenticated Admin/Official into a one-time request delivered to the linked citizen's authenticated web inbox; approved completion rereads the requested hash's current Solidity status.
+9. Successful frontend operations publish typed scene events to an in-process bus. The Demo UI translates them into queued PixiJS animations; eligible roles also receive best-effort cross-tab events from audit polling.
 
 ## 3. EXISTING FUNCTIONALITY
 
@@ -68,6 +83,7 @@ Do not reverse or bypass this ordering. The citizen's stamped copy must be the e
 - `backend/internal/docid/docid.go` defines and extracts `CREDREG-DOCID:<docId>`.
 - `backend/internal/pdfdoc/pdfdoc.go` appends a registry page using a PDF incremental update, leaving original bytes untouched.
 - The page includes a vector QR and visible marker.
+- The registry page embeds the same QR as a PNG attachment named `<document-id>-qr.png` and overlays the visible “Download QR PNG” label with a direct `{PUBLIC_API_URL}/qr/{docId}/download.png` link, covering browser PDF viewers that ignore attachments. Both annotations are part of the stamped bytes before hashing and anchoring.
 - If the simple PDF parser cannot handle a file, stamping falls back to a trailing PDF comment containing the marker.
 - New credentials encode `{PUBLIC_WEB_URL}/verify?docId=...`; legacy `Stamp` and existing PDFs retain bare document-ID compatibility.
 - PDF behavior is covered by `backend/internal/pdfdoc/pdfdoc_test.go`.
@@ -103,18 +119,35 @@ Looking up the ID first would misclassify a genuine superseded original because 
 
 ### Existing frontend screens
 
-- `frontend/src/screens/Login.tsx`: Supabase email/password sign-in.
-- `frontend/src/screens/Verify.tsx`: PDF upload/drop verification and result display, with a helper path for verifying an ID.
-- `frontend/src/screens/Issue.tsx`: department selection, citizen/document fields, PDF upload, client-side ID generation, and stamped-document result/download.
+- `frontend/src/screens/Login.tsx`: role-intent selection for Controller, Government Authority (Admin/Official), and Citizen followed by Supabase email/password sign-in. The selection is session-scoped presentation state only; backend profile resolution remains authoritative.
+- The authenticated shell displays backend-owned identity and department context. Government roles receive only their allowed workspaces; citizens receive separate My Credentials and Inbox navigation placeholders for the following phases.
+- `frontend/src/screens/Verify.tsx`: exact stamped-PDF upload/drop verification with explicit byte-authenticity guidance, hash comparison, and separate lifecycle verdict explanation. It does not present ID/QR lookup as proof of PDF integrity.
+- `frontend/src/screens/Issue.tsx`: department selection, citizen/document fields, PDF upload, client-side ID generation, and a stamped-document result with exact-PDF download plus copy actions for the document ID, anchored hash, and transaction hash.
 - `frontend/src/screens/Citizen.tsx`: citizen selection and credential history.
+- `frontend/src/screens/CitizenDashboard.tsx` and `CitizenInbox.tsx`: authenticated citizen-owned PDFs and persisted verification decisions.
+- `frontend/src/screens/GovernmentRequests.tsx`: Admin/Official request history, state filters, refresh, and approved-request completion independent of the original QR browser session.
 - `frontend/src/screens/Monitoring.tsx` and `frontend/src/screens/AuditEvents.tsx`: minimal temporary Phase 2 browser-validation UI, intentionally replaceable by the frontend team's final dashboard.
-- `frontend/src/screens/Lifecycle.tsx`: minimal temporary Admin-only revoke/supersede validation forms using the existing Phase 2 API contracts.
+- `frontend/src/screens/Lifecycle.tsx`: Admin-only revoke/supersede flows driven by selectable valid credentials from the authenticated department rather than manually entered hashes.
+- `frontend/src/screens/Demo.tsx`: standalone `/demo` PixiJS registry-floor presentation with a nine-step role-aware guided walkthrough and a manual preview-event panel.
+- `frontend/src/scene/LiveFloor.tsx`: collapsible live visualization inside the authenticated application shell.
 - `frontend/src/verdicts.ts`: centralized verdict display configuration.
+
+### Demo UI event model
+
+- `frontend/src/scene/sceneApi.ts` defines the `SceneEvent` vocabulary for issue, verify, supersede, revoke, and consent activity.
+- `frontend/src/api.ts` remains the application API boundary and emits scene events after the relevant API calls. Do not bypass it with new component-level `fetch()` calls merely to drive the visualization.
+- `frontend/src/scene/apiBus.ts` is an in-memory publish/subscribe bus. It is the primary source for actions performed in the current tab and includes an eight-second duplicate guard.
+- `frontend/src/scene/auditPoll.ts` polls `/audit-events` every four seconds as a secondary source for actions performed elsewhere, such as a citizen decision. It is available only to roles allowed to read audit events and stops after a `403`; OFFICIAL users therefore rely on the in-tab bus.
+- `frontend/src/scene/choreography.ts` queues events and plays one animation at a time using simulated Pixi ticker time. A backgrounded browser tab may pause animation because `requestAnimationFrame` is suspended.
+- `frontend/src/scene/guidedScript.ts` performs real backend calls only when the current profile has permission. ADMIN can run the complete sequence; OFFICIAL runs issue/verify/consent steps and previews lifecycle steps; CONTROLLER and anonymous visitors preview the sequence.
+- `frontend/public/demo/blank-credential.pdf` is the input used by real guided issue/supersede steps. Real guided mode also requires seeded citizen accounts and valid backend/Supabase configuration.
+- The vendored LimeZu tilesets and sprites are licensed for non-commercial use only. See `frontend/src/scene/assets/tilesets/LIMEZUASSETS-LICENSE.txt`; replace them before any commercial use.
 
 ### Current backend endpoints
 
 - `GET /health`
 - `GET /departments`
+- `GET /qr/{docId}/download.png` (public PNG for an issued credential)
 - `GET /citizens`
 - `POST /issue`
 - `POST /verify`
@@ -122,8 +155,12 @@ Looking up the ID first would misclassify a genuine superseded original because 
 - `POST /revoke`
 - `POST /supersede`
 - `GET /credentials/{citizen}`
+- `GET /department/credentials` (department-scoped lifecycle selection data)
+- `GET /citizen/credentials` (authenticated citizen's own linked documents)
+- `GET /citizen/documents/{hash}/download` (ownership-scoped citizen PDF download)
 - `GET /documents/{hash}/download`
 - `GET /me` (authenticated application profile)
+- `GET /account` (authenticated unified government/citizen account bootstrap)
 - `GET /auth-test` (temporary authentication-only diagnostic)
 - `GET /audit-events` (Controller system-wide; Admin department-scoped)
 - `GET /monitoring/overview` (Controller only)
@@ -131,6 +168,8 @@ Looking up the ID first would misclassify a genuine superseded original because 
 - `POST /verification-requests`, `GET /verification-requests`, `GET /verification-requests/{id}`, and `POST /verification-requests/{id}/complete`
 - `GET /consent/{token}`, `POST /consent/{token}/approve`, and `POST /consent/{token}/deny` (token-authenticated, no Supabase citizen login)
 - `GET /development/notifications/{id}` (authenticated/scoped in-memory demo email capture)
+- `GET /citizen/verification-requests` (authenticated citizen's ownership-scoped inbox)
+- `POST /citizen/verification-requests/{id}/decision` (atomic authenticated approve/deny)
 
 ## 4. AUTHENTICATION
 
@@ -234,7 +273,7 @@ Profile authorization changes use the audited store method, which commits the pr
 
 Phase 3 implements:
 
-`QR scan -> verification page -> government user authenticates -> request + purpose -> development email capture -> citizen email link -> approve/deny -> approved requester completes -> current chain verdict`
+`QR scan -> verification page -> government user authenticates -> request + purpose -> citizen web inbox -> approve/deny -> approved requester completes -> current chain verdict`
 
 Citizen approval applies to one specific verification request. It must not permanently authorize an official or department.
 
@@ -246,7 +285,7 @@ The request lifecycle is:
 - `EXPIRED`
 - `COMPLETED`
 
-Citizens are separate from government `user_profiles`; `CITIZEN` is not an RBAC role. Citizen accounts require email and are provisioned with `backend/cmd/citizen-seed`. Raw random tokens/URLs exist only in the authenticated in-memory development notification capture; SQLite stores SHA-256 token hashes. Tokens expire after 15 minutes and are request-specific. Consent decisions and completion use guarded atomic transitions, and consent/audit writes are atomic. No scheduler or real email provider is included.
+Citizens are separate from government `user_profiles`; `CITIZEN` is not an RBAC role. Citizen accounts require email and are provisioned with `backend/cmd/citizen-seed`. The optional unique `supabase_user_id` links a citizen account to Supabase Auth, and `CitizenAccountBySupabaseUserID` is the trusted lookup for authenticated citizen identity. `GET /account` resolves a verified Supabase identity against both profile tables, rejects missing/inactive or ambiguous dual-linked identities, and returns a discriminated `GOVERNMENT`/`CITIZEN` response. Routine reseeding without `-supabase-user-id` preserves an existing identity link. New consent requests are delivered only to the ownership-scoped web inbox and expire after 24 hours. Citizen decisions are guarded atomic transitions keyed by both request and authenticated citizen account, persist across sessions, and commit with their audit event. Legacy token endpoints remain for pre-existing token-backed records, but new requests do not create or expose email links.
 
 `POST /verify` remains the authenticated file-possession authenticity check. Direct `GET /verify/{docId}` returns `409` for linked credentials so it cannot bypass consent; it remains compatible for old unlinked credentials. The QR frontend never calls direct ID verification.
 
@@ -294,13 +333,30 @@ Do not invent response fields or endpoints. If the frontend needs a role, depart
 
 ## 12. LOCAL DEVELOPMENT AND CONFIGURATION
 
-- The local demo requires Go 1.22+, Node 20+, Foundry/Anvil, and a reachable Supabase project.
+- The preferred local path requires Docker, Docker Compose, and a reachable Supabase project. Doppler is optional; it can inject configuration instead of a local `.env`.
+- Copy `.env.example` to an untracked `.env` when not using Doppler. Required values are `SUPABASE_URL`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_PUBLISHABLE_KEY`. Government `SEED_*_USER_ID` values are optional and each non-empty ID provisions that profile. Demo-document seeding runs only when all three department `SEED_*_TOKEN` values are present; the tokens are short-lived and must correspond to their Admin profiles.
+- With Doppler configured for the repository, start the complete stack from the repository root with `doppler run -- docker compose up`. Without Doppler, use `docker compose up`; Compose automatically reads `.env`.
+- The Compose dependency order is `init-volumes`/`anvil` -> `deploy` -> `profiles` -> `backend` -> `seed`, with `frontend` depending on the backend. `deploy`, `profiles`, and `seed` are expected one-shot containers that exit successfully.
+- Default local addresses are frontend `http://127.0.0.1:5173`, backend `http://127.0.0.1:8088`, and Anvil `http://127.0.0.1:8545`. Override collisions with `WEB_PORT`, `API_PORT`, or `ANVIL_PORT`; keep `VITE_API_URL`, `PUBLIC_WEB_URL`, and `PUBLIC_API_URL` consistent with browser-reachable addresses.
+- Use `docker compose down` to stop while retaining named-volume state. `docker compose down -v` also deletes the Compose chain, deployment, and SQLite volumes and is intentionally destructive to demo state. Inspect a service with `docker compose logs -f backend` (or another service name).
+- The direct-host fallback requires Go 1.22+, Node 20+, Foundry/Anvil, and the same Supabase values. Run `make demo` from the repository root and `make stop` when finished. Be aware that `make demo` begins with `clean` and deletes local demo state/artifacts before rebuilding.
 - The backend requires `SUPABASE_URL`. It also supports `RPC_URL`, `DB_PATH`, `CONTRACT_ADDRESS` or `DEPLOYMENT_FILE`, and `ADDR`.
-- The frontend requires `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`; `VITE_API_URL` optionally overrides the backend URL. The backend `PUBLIC_WEB_URL` explicitly controls QR/consent URLs. Keep local `.env` files untracked.
+- The frontend requires `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`; `VITE_API_URL` optionally overrides the backend URL. The backend `PUBLIC_WEB_URL` controls verification URLs, and `PUBLIC_API_URL` controls direct PNG download links embedded in PDFs. Keep local `.env` files untracked.
 - A Supabase account's JWT `sub` must exactly match `user_profiles.supabase_user_id`. The backend never derives application roles from JWT metadata.
-- `make demo` starts Anvil, deploys the contract, provisions three department Admin profiles, seeds authenticated demo credentials, and starts the backend and frontend. It requires matching `SEED_*_USER_ID` and `SEED_*_TOKEN` environment variables for the three demo departments.
+- The direct-host `make demo` path still expects the three department Admin IDs and tokens. Flexible partial-profile provisioning is currently specific to Docker Compose.
 - `backend/cmd/profile-seed` is the non-interactive local profile provisioning path. Profile changes and their audit entries commit atomically.
-- Use `make stop` to stop local services. Direct validation commands remain `GOCACHE=/tmp/credreg-go-cache go test ./...` from `backend`, `npm run build` from `frontend`, and `forge test` from `contracts` only when Solidity changes.
+- Direct validation commands remain `GOCACHE=/tmp/credreg-go-cache go test ./...` from `backend`, `npm run build` and `npm run lint` from `frontend`, and `forge test` from `contracts` when Solidity changes.
+
+### Quick local run checklist
+
+1. Ensure at least one Supabase government account exists and copy its stable user ID. A full seeded fixture requires all three department Admins.
+2. For the full fixture only, obtain fresh access tokens for all three Admin accounts.
+3. Configure the applicable variables from `.env.example` in Doppler, or place them in an untracked `.env`.
+4. Run `doppler run -- docker compose up` or `docker compose up` from the repository root.
+5. Wait for the one-shot `deploy`, `profiles`, and `seed` services to exit successfully and for the three long-running services to remain up.
+6. Open `http://127.0.0.1:5173` for the authenticated app or `http://127.0.0.1:5173/demo` for the registry-floor presentation.
+7. Use preview mode at `/demo` without signing in. Sign in as ADMIN or OFFICIAL only when intentionally exercising the guided script against the live backend; those live steps create and mutate demo credentials.
+8. Stop with `docker compose down`. Add `-v` only when deliberately resetting the local chain and database.
 
 ## 13. GIT / DEVELOPMENT RULES
 
@@ -341,9 +397,12 @@ Do not invent response fields or endpoints. If the frontend needs a role, depart
 - PDF marker/QR stamping with incremental-update and fallback behavior.
 - Verification verdict state machine with Go tests.
 - SQLite document/PDF storage, citizen lookup, credential listing, and download.
+- Authenticated citizen dashboard with Supabase-identity-derived credential listing and ownership-checked stamped-PDF downloads.
+- Regression coverage enforces citizen/government route separation, cross-citizen request/download denial, inbox decision idempotency and expiry, and transactional rollback when decision audit logging fails.
 - Issue, verify, supersede, and revoke backend handlers.
 - Verify, Issue, Citizen, and Login frontend screens.
 - Supabase email/password login and session handling.
+- Role-selection login with backend-validated account-type matching and unified `/account` session bootstrap.
 - Supabase ES256/JWKS Go verification, bearer middleware, context identity extraction, and temporary `/auth-test`.
 - A successful manual real Supabase JWT-to-Go-backend authentication test.
 - SQLite department and user-profile models with role/department constraints.
@@ -356,9 +415,13 @@ Do not invent response fields or endpoints. If the frontend needs a role, depart
 - Minimal temporary Controller monitoring, Controller/Admin audit-event, and Admin lifecycle validation screens.
 - Separate citizen accounts with mandatory email and controlled provisioning/linking CLI.
 - URL-based QR stamping for new credentials with legacy bare-ID compatibility.
-- Consent-gated verification requests, expiring hashed tokens, atomic approve/deny/complete transitions, and current-chain completion.
-- Minimal QR landing, request status/completion, and public citizen consent screens.
-- In-memory authenticated development notification capture with redacted persistent attempts.
+- Consent-gated verification requests with 24-hour authenticated inbox delivery, atomic approve/deny/complete transitions, and current-chain completion.
+- QR-started government request flow, authenticated citizen inbox, and durable government request dashboard.
+- Authenticated citizen verification-request inbox with 24-hour expiry and persisted `WEB_INBOX` delivery attempts.
+- Docker Compose orchestration for Anvil, deployment, profile/citizen provisioning, backend, authenticated document seeding, and the Vite frontend.
+- Optional Doppler-driven environment injection, with `.env.example` as the non-Doppler configuration template.
+- Split backend/frontend container images, Vercel SPA rewrite configuration, and a standalone root image that co-locates Anvil and the Go backend for Railway-style hosting.
+- A PixiJS registry-floor Demo UI on the unmerged `demo-ui` branch, including preview controls, role-aware guided execution, an authenticated live floor, API-bus events, and audit-poll fallback.
 
 ### B. Partially implemented / known limitations
 
@@ -369,19 +432,23 @@ Do not invent response fields or endpoints. If the frontend needs a role, depart
 - Monitoring statistics cover retained audit events, not operations performed before audit logging was introduced.
 - Supabase authentication has been manually validated end-to-end, but there is no automated live-Supabase integration test.
 - Monitoring, Audit Events, Revoke, and Supersede frontend screens are intentionally minimal temporary validation UI, not the frontend team's final dashboard.
-- Development notifications do not send real email and disappear on backend restart.
+- The running local stack currently has no Supabase user ID linked to either demo citizen; a live browser citizen-login walkthrough requires provisioning a Supabase citizen and setting `SEED_ASHA_USER_ID` or `SEED_RAHUL_USER_ID`.
 - Existing unlinked credentials cannot use secure consent until linked explicitly with controlled tooling.
+- The Demo UI visualization has been browser-validated in preview mode, but the commit history does not establish a complete browser-validated live walkthrough for every RBAC role and hosted environment.
+- `/demo` and the consent/verification entry paths still use manual pathname handling rather than a router.
+- Demo scene art is licensed for non-commercial use only and is unsuitable for a commercial release without replacement.
+- Doppler supplies environment variables only; the repository contains no committed Doppler project definition. Hosted service configuration outside the checked-in Docker/Vercel files remains external state.
 
 ### C. Planned/not implemented
 
 - Final Controller dashboard UI (the backend contracts and temporary validation UI are implemented).
-- Real email provider integration and production notification delivery/retry policy.
 - A final routed frontend architecture; Phase 3 uses minimal pathname/query handling.
 - Production wallet/key management.
+- Replacement or appropriately licensed production artwork for the Demo UI.
 
 ## 16. CURRENT NEXT PHASE
 
-Phase 1 — RBAC Foundation, Phase 2 — Audit + Administrative Monitoring, and Phase 3 — QR Citizen Consent are implemented. The next phase must be explicitly agreed before implementation.
+Phase 1 — RBAC Foundation, Phase 2 — Audit + Administrative Monitoring, Phase 3 — QR-started consent, and the authenticated citizen portal/inbox workflow are implemented on `feature/citizen-portal-flow`. The next functional phase must be explicitly agreed before implementation.
 
 Before changing code in a future session:
 
@@ -394,6 +461,6 @@ Before changing code in a future session:
 
 ## CURRENT STATE / NEXT TASK
 
-**Current state:** Core lifecycle, URL/bare-ID compatible stamping, SQLite persistence, blockchain anchoring, Supabase government authentication, backend RBAC, audit/monitoring, citizen accounts and document linkage, consent requests, hashed one-time email tokens, current-chain completion, and minimal Phase 2/3 validation UI are implemented.
+**Current state:** Core lifecycle, exact-PDF verification, SQLite persistence, blockchain anchoring, Supabase authentication, government RBAC, citizen accounts, citizen-owned credential downloads, 24-hour web-inbox consent, persistent decisions, government request recovery/completion, list-driven lifecycle actions, Docker/hosted-demo configuration, and the PixiJS registry-floor visualization are implemented.
 
-**Next task:** Validate Phase 3 end-to-end, then agree on the next bounded phase. Do not add real notification infrastructure or redesign the frontend without explicit scope.
+**Next task:** Provision and link at least one real Supabase citizen account, then browser-validate the live government QR/request -> citizen inbox decision -> government completion flow. The automated API flow, Go suites, frontend build, Compose configuration, and running service health are green.

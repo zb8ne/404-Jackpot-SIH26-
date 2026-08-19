@@ -26,6 +26,7 @@ func main() {
 		dbPath       = flag.String("db", envOr("DB_PATH", "credentials.db"), "SQLite file")
 		contractFlag = flag.String("contract", os.Getenv("CONTRACT_ADDRESS"), "registry address (defaults to contracts/deployment.txt)")
 		publicWebURL = flag.String("public-web-url", envOr("PUBLIC_WEB_URL", "http://127.0.0.1:5173"), "public frontend URL embedded in credential QR codes")
+		publicAPIURL = flag.String("public-api-url", envOr("PUBLIC_API_URL", "http://127.0.0.1:8088"), "public backend URL embedded in QR download links")
 		deployFile   = flag.String("deployment", envOr("DEPLOYMENT_FILE", "../contracts/deployment.txt"), "file holding the deployed address")
 	)
 	flag.Parse()
@@ -73,7 +74,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           api.New(c, st, verifier, *publicWebURL),
+		Handler:           api.New(c, st, verifier, *publicWebURL, *publicAPIURL),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Fatal(srv.ListenAndServe())
