@@ -3,7 +3,7 @@ import { getHealth, getMe, type ApplicationUser } from './api'
 import { Citizen } from './screens/Citizen'
 import { Issue } from './screens/Issue'
 import { Verify } from './screens/Verify'
-import { Login } from './screens/Login'
+import { LOGIN_INTENT_KEY, Login } from './screens/Login'
 import { AuditEvents } from './screens/AuditEvents'
 import { Monitoring } from './screens/Monitoring'
 import { Revoke, Supersede } from './screens/Lifecycle'
@@ -106,6 +106,7 @@ export default function App() {
 
   async function logout() {
     await supabase.auth.signOut()
+    sessionStorage.removeItem(LOGIN_INTENT_KEY)
   }
 
   return (

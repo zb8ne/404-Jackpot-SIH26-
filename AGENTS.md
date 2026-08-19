@@ -117,7 +117,7 @@ Looking up the ID first would misclassify a genuine superseded original because 
 
 ### Existing frontend screens
 
-- `frontend/src/screens/Login.tsx`: Supabase email/password sign-in.
+- `frontend/src/screens/Login.tsx`: role-intent selection for Controller, Government Authority (Admin/Official), and Citizen followed by Supabase email/password sign-in. The selection is session-scoped presentation state only; backend profile resolution remains authoritative.
 - `frontend/src/screens/Verify.tsx`: PDF upload/drop verification and result display, with a helper path for verifying an ID.
 - `frontend/src/screens/Issue.tsx`: department selection, citizen/document fields, PDF upload, client-side ID generation, and stamped-document result/download.
 - `frontend/src/screens/Citizen.tsx`: citizen selection and credential history.
