@@ -15,6 +15,8 @@ import { SpriteAdapter } from './engine/SpriteAdapter';
 import { TiledMapRenderer } from './engine/TiledMapRenderer';
 import { installContextLossRecovery } from './engine/glRecovery';
 import { ACTOR_SEATS, BACKGROUND, resolveMap, tilesetUrls, type ActorId } from './registryTheme';
+import { createChoreographer } from './choreography';
+import type { SceneApi } from './sceneApi';
 import { colors } from './tokens';
 
 import adamSheet from './assets/characters/Adam_walk.png?url';
@@ -69,7 +71,14 @@ function safeDestroy(app: Application) {
   }
 }
 
-export function RegistryFloor() {
+interface RegistryFloorProps {
+  /** Handed the imperative handle once the floor is live. */
+  onReady?: (api: SceneApi) => void;
+  /** Caption for whatever is playing; '' when the floor is idle. */
+  onCaption?: (caption: string) => void;
+}
+
+export function RegistryFloor({ onReady, onCaption }: RegistryFloorProps = {}) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<Application | null>(null);
   const mountIdRef = useRef(0);
@@ -77,6 +86,11 @@ export function RegistryFloor() {
   // the whole scene through the normal mount path rather than a second routine.
   const [glGeneration, setGlGeneration] = useState(0);
   const [error, setError] = useState('');
+  // Held in refs so a parent re-render never tears the Pixi scene down.
+  const onReadyRef = useRef(onReady);
+  const onCaptionRef = useRef(onCaption);
+  onReadyRef.current = onReady;
+  onCaptionRef.current = onCaption;
 
   // A hidden tab still runs the ticker and draws every frame into pixels nobody
   // sees. Stop the ticker instead of unmounting: textures and the scene graph
@@ -193,10 +207,24 @@ export function RegistryFloor() {
       window.addEventListener('resize', onResize);
       (app as unknown as { __onResize: () => void }).__onResize = onResize;
 
+      const choreographer = createChoreographer({
+        characters,
+        layer: charLayer,
+        camera,
+        onCaption: (caption) => onCaptionRef.current?.(caption),
+      });
+
       app.ticker.add((ticker) => {
         const dt = ticker.deltaMS / 1000;
         camera.update(dt);
         for (const character of characters.values()) character.update(dt);
+        choreographer.update(dt);
+      });
+
+      onReadyRef.current?.({
+        play: (event) => choreographer.play(event),
+        reset: () => choreographer.reset(),
+        pending: () => choreographer.pending(),
       });
 
       // Paint one frame unconditionally. Without this a floor built while the tab
@@ -209,7 +237,7 @@ export function RegistryFloor() {
       // tab gets no requestAnimationFrame, so nothing animates and the scene looks
       // broken when it is merely paused. Pump `characters` by hand to check.
       if (import.meta.env.DEV) {
-        (window as unknown as { __floor: unknown }).__floor = { app, world, camera, mapRenderer, characters };
+        (window as unknown as { __floor: unknown }).__floor = { app, world, camera, mapRenderer, characters, choreographer };
       }
     };
 
