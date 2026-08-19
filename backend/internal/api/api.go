@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -65,6 +66,9 @@ func newHandlerConfigured(c registry, s *store.Store, verifier auth.TokenVerifie
 	authenticated := func(next http.Handler) http.Handler {
 		return auth.Middleware(verifier)(rbac.LoadProfile(s)(next))
 	}
+	identityAuthenticated := func(next http.Handler) http.Handler {
+		return auth.Middleware(verifier)(next)
+	}
 	protected := func(permission rbac.Permission, handler http.HandlerFunc) http.Handler {
 		return authenticated(rbac.Require(permission)(handler))
 	}
@@ -76,6 +80,7 @@ func newHandlerConfigured(c registry, s *store.Store, verifier auth.TokenVerifie
 	}
 
 	mux.Handle("GET /me", authenticated(http.HandlerFunc(srv.me)))
+	mux.Handle("GET /account", identityAuthenticated(http.HandlerFunc(srv.account)))
 	mux.Handle("GET /citizens", protected(rbac.PermissionViewDept, srv.citizens))
 	mux.Handle("POST /issue", audited(rbac.PermissionIssue, actionIssue, srv.issue))
 	mux.Handle("POST /verify", audited(rbac.PermissionVerify, actionVerifyFile, srv.verify))
@@ -189,6 +194,76 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) account(w http.ResponseWriter, r *http.Request) {
+	user, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "authenticated user missing from context")
+		return
+	}
+
+	government, governmentErr := s.store.UserProfileByID(user.ID)
+	citizen, citizenErr := s.store.CitizenAccountBySupabaseUserID(user.ID)
+	governmentFound := governmentErr == nil
+	citizenFound := citizenErr == nil
+	if governmentErr != nil && !errors.Is(governmentErr, store.ErrNotFound) {
+		writeErr(w, http.StatusInternalServerError, "could not load application account")
+		return
+	}
+	if citizenErr != nil && !errors.Is(citizenErr, store.ErrNotFound) {
+		writeErr(w, http.StatusInternalServerError, "could not load application account")
+		return
+	}
+	if governmentFound && citizenFound {
+		writeErr(w, http.StatusConflict, "identity is linked to both government and citizen accounts")
+		return
+	}
+	if !governmentFound && !citizenFound {
+		writeErr(w, http.StatusForbidden, "no application account is linked to this identity")
+		return
+	}
+
+	if governmentFound {
+		if !government.Active || (government.Department != nil && !government.Department.Active) {
+			writeErr(w, http.StatusForbidden, "application account is inactive")
+			return
+		}
+		var department any
+		if d := government.Department; d != nil {
+			department = map[string]any{
+				"id": d.ID, "name": d.DisplayName, "docType": d.DocType,
+				"docTypeName": chain.DocTypeName(d.DocType),
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"accountType": "GOVERNMENT",
+			"id":          government.SupabaseUserID,
+			"email":       government.Email,
+			"governmentProfile": map[string]any{
+				"id": government.SupabaseUserID, "email": government.Email,
+				"name": government.DisplayName, "role": government.Role,
+				"active": government.Active, "department": department,
+			},
+			"citizenProfile": nil,
+		})
+		return
+	}
+
+	if !citizen.Active {
+		writeErr(w, http.StatusForbidden, "application account is inactive")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"accountType":       "CITIZEN",
+		"id":                citizen.ID,
+		"email":             citizen.Email,
+		"governmentProfile": nil,
+		"citizenProfile": map[string]any{
+			"id": citizen.ID, "email": citizen.Email,
+			"displayName": citizen.DisplayName, "active": citizen.Active,
+		},
+	})
 }
 
 func (s *Server) citizens(w http.ResponseWriter, r *http.Request) {

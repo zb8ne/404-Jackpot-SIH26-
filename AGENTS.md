@@ -151,6 +151,7 @@ Looking up the ID first would misclassify a genuine superseded original because 
 - `GET /credentials/{citizen}`
 - `GET /documents/{hash}/download`
 - `GET /me` (authenticated application profile)
+- `GET /account` (authenticated unified government/citizen account bootstrap)
 - `GET /auth-test` (temporary authentication-only diagnostic)
 - `GET /audit-events` (Controller system-wide; Admin department-scoped)
 - `GET /monitoring/overview` (Controller only)
@@ -273,7 +274,7 @@ The request lifecycle is:
 - `EXPIRED`
 - `COMPLETED`
 
-Citizens are separate from government `user_profiles`; `CITIZEN` is not an RBAC role. Citizen accounts require email and are provisioned with `backend/cmd/citizen-seed`. The optional unique `supabase_user_id` links a citizen account to Supabase Auth, and `CitizenAccountBySupabaseUserID` is the trusted lookup for future authenticated citizen handlers. Routine reseeding without `-supabase-user-id` preserves an existing identity link. Raw random tokens/URLs exist only in the authenticated in-memory development notification capture; SQLite stores SHA-256 token hashes. Tokens expire after 15 minutes and are request-specific. Consent decisions and completion use guarded atomic transitions, and consent/audit writes are atomic. No scheduler or real email provider is included.
+Citizens are separate from government `user_profiles`; `CITIZEN` is not an RBAC role. Citizen accounts require email and are provisioned with `backend/cmd/citizen-seed`. The optional unique `supabase_user_id` links a citizen account to Supabase Auth, and `CitizenAccountBySupabaseUserID` is the trusted lookup for authenticated citizen identity. `GET /account` resolves a verified Supabase identity against both profile tables, rejects missing/inactive or ambiguous dual-linked identities, and returns a discriminated `GOVERNMENT`/`CITIZEN` response. Routine reseeding without `-supabase-user-id` preserves an existing identity link. Raw random tokens/URLs exist only in the authenticated in-memory development notification capture; SQLite stores SHA-256 token hashes. Tokens expire after 15 minutes and are request-specific. Consent decisions and completion use guarded atomic transitions, and consent/audit writes are atomic. No scheduler or real email provider is included.
 
 `POST /verify` remains the authenticated file-possession authenticity check. Direct `GET /verify/{docId}` returns `409` for linked credentials so it cannot bypass consent; it remains compatible for old unlinked credentials. The QR frontend never calls direct ID verification.
 
@@ -388,6 +389,7 @@ Do not invent response fields or endpoints. If the frontend needs a role, depart
 - Issue, verify, supersede, and revoke backend handlers.
 - Verify, Issue, Citizen, and Login frontend screens.
 - Supabase email/password login and session handling.
+- Role-selection login with backend-validated account-type matching and unified `/account` session bootstrap.
 - Supabase ES256/JWKS Go verification, bearer middleware, context identity extraction, and temporary `/auth-test`.
 - A successful manual real Supabase JWT-to-Go-backend authentication test.
 - SQLite department and user-profile models with role/department constraints.

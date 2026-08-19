@@ -47,6 +47,29 @@ export type ApplicationUser = {
   }
 }
 
+export type CitizenProfile = {
+  id: string
+  email: string
+  displayName: string
+  active: boolean
+}
+
+export type AuthenticatedAccount =
+  | {
+      accountType: 'GOVERNMENT'
+      id: string
+      email: string
+      governmentProfile: ApplicationUser
+      citizenProfile: null
+    }
+  | {
+      accountType: 'CITIZEN'
+      id: string
+      email: string
+      governmentProfile: null
+      citizenProfile: CitizenProfile
+    }
+
 export type Credential = {
   docHash: string
   docId: string
@@ -239,6 +262,7 @@ async function request<T>(path: string, init: RequestInit = {}, authenticated = 
 export const getHealth = () => request<{ ok: boolean; contract: string }>('/health', {}, false)
 export const getDepartments = () => request<Department[]>('/departments', {}, false)
 export const getMe = () => request<ApplicationUser>('/me')
+export const getAccount = () => request<AuthenticatedAccount>('/account')
 export const getCitizens = () => request<string[]>('/citizens')
 export const getCitizenAccounts = () => request<CitizenAccountOption[]>('/citizen-accounts')
 

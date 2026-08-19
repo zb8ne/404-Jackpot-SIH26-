@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { getHealth, getMe, type ApplicationUser } from './api'
+import { getAccount, getHealth, type ApplicationUser, type AuthenticatedAccount } from './api'
 import { Citizen } from './screens/Citizen'
 import { Issue } from './screens/Issue'
 import { Verify } from './screens/Verify'
-import { LOGIN_INTENT_KEY, Login } from './screens/Login'
+import { LOGIN_INTENT_KEY, Login, type LoginIntent } from './screens/Login'
 import { AuditEvents } from './screens/AuditEvents'
 import { Monitoring } from './screens/Monitoring'
 import { Revoke, Supersede } from './screens/Lifecycle'
@@ -41,8 +41,10 @@ export default function App() {
   const [session, setSession] = useState<any>(null)
   const [tab, setTab] = useState<Tab>('verify')
   const [contract, setContract] = useState('')
+  const [account, setAccount] = useState<AuthenticatedAccount | null>(null)
   const [profile, setProfile] = useState<ApplicationUser | null>(null)
   const [profileError, setProfileError] = useState('')
+  const [loginError, setLoginError] = useState('')
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -66,17 +68,32 @@ export default function App() {
 
   useEffect(() => {
     if (!session) {
+      setAccount(null)
       setProfile(null)
       setProfileError('')
       return
     }
 
-    getMe()
-      .then((me) => {
-        setProfile(me)
+    getAccount()
+      .then(async (resolvedAccount) => {
+        const intent = sessionStorage.getItem(LOGIN_INTENT_KEY) as LoginIntent | null
+        const actualRole = resolvedAccount.accountType === 'GOVERNMENT'
+          ? resolvedAccount.governmentProfile.role
+          : 'CITIZEN'
+        if (!intent || intent !== actualRole) {
+          setLoginError(!intent
+            ? 'Choose an account type before signing in.'
+            : `This account is registered as ${actualRole.toLowerCase()}, not ${intent.toLowerCase()}.`)
+          await supabase.auth.signOut()
+          return
+        }
+        setAccount(resolvedAccount)
+        setProfile(resolvedAccount.governmentProfile)
         setProfileError('')
+        setLoginError('')
       })
       .catch((error) => {
+        setAccount(null)
         setProfile(null)
         setProfileError(error instanceof Error ? error.message : String(error))
       })
@@ -100,7 +117,7 @@ export default function App() {
   }
 
   if (!session) {
-    return <Login />
+    return <Login initialError={loginError} />
   }
 
 
@@ -175,7 +192,13 @@ export default function App() {
             {profileError}
           </div>
         )}
-        {profile ? (
+        {account?.accountType === 'CITIZEN' ? (
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/50 p-8">
+            <p className="text-xs font-semibold uppercase tracking-widest text-sky-400">Citizen account</p>
+            <h2 className="mt-2 text-3xl font-black text-slate-100">Welcome, {account.citizenProfile.displayName}</h2>
+            <p className="mt-3 text-slate-400">Your credential dashboard will be added in the next phase.</p>
+          </section>
+        ) : profile ? (
           <>
             {qrDocumentId && profile.role !== 'CONTROLLER' ? <VerificationRequestFlow documentId={qrDocumentId} /> : tab === 'verify' && <Verify />}
             {tab === 'issue' && <Issue />}

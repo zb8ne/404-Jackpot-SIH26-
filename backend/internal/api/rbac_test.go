@@ -139,6 +139,7 @@ func TestProtectedRoutesRejectUnauthenticatedRequests(t *testing.T) {
 	handler := rbacHandler(t, "ADMIN", "birth")
 	for _, endpoint := range []struct{ method, path string }{
 		{http.MethodGet, "/me"},
+		{http.MethodGet, "/account"},
 		{http.MethodGet, "/citizens"},
 		{http.MethodPost, "/issue"},
 		{http.MethodPost, "/verify"},
@@ -311,6 +312,96 @@ func TestMeUsesBackendOwnedProfile(t *testing.T) {
 	if !strings.Contains(response.Body.String(), `"email":"profile@example.gov"`) ||
 		strings.Contains(response.Body.String(), "jwt@example.gov") {
 		t.Fatalf("/me did not use backend profile: %s", response.Body.String())
+	}
+}
+
+func TestAccountResolvesGovernmentProfile(t *testing.T) {
+	handler := rbacHandler(t, "ADMIN", "birth")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/account", nil, ""))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"accountType":"GOVERNMENT"`) ||
+		!strings.Contains(response.Body.String(), `"email":"profile@example.gov"`) ||
+		strings.Contains(response.Body.String(), "jwt@example.gov") {
+		t.Fatalf("/account did not use backend government profile: %s", response.Body.String())
+	}
+}
+
+func TestAccountResolvesCitizenProfile(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	supabaseID := "citizen-user"
+	if err := s.UpsertCitizenAccount(store.CitizenAccount{
+		ID: "citizen-1", SupabaseUserID: &supabaseID, DisplayName: "Citizen Name",
+		Email: "profile@example.test", Active: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	registry := &apiRegistry{records: map[[32]byte]chain.Record{}, current: map[string][32]byte{}}
+	handler := newHandler(registry, s, apiVerifier{user: &auth.User{ID: supabaseID, Email: "jwt@example.test"}}, "0xcontract")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/account", nil, ""))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"accountType":"CITIZEN"`) ||
+		!strings.Contains(response.Body.String(), `"displayName":"Citizen Name"`) ||
+		strings.Contains(response.Body.String(), "jwt@example.test") {
+		t.Fatalf("/account did not use backend citizen profile: %s", response.Body.String())
+	}
+}
+
+func TestAccountRejectsMissingAmbiguousAndInactiveProfiles(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		government *store.UserProfile
+		citizen    *store.CitizenAccount
+		wantStatus int
+	}{
+		{name: "missing", wantStatus: http.StatusForbidden},
+		{
+			name:       "ambiguous",
+			government: &store.UserProfile{SupabaseUserID: "user-1", Email: "admin@example.gov", DisplayName: "Admin", Role: "ADMIN", Active: true},
+			citizen:    &store.CitizenAccount{ID: "citizen-1", DisplayName: "Citizen", Email: "citizen@example.test", Active: true},
+			wantStatus: http.StatusConflict,
+		},
+		{
+			name:       "inactive citizen",
+			citizen:    &store.CitizenAccount{ID: "citizen-1", DisplayName: "Citizen", Email: "citizen@example.test", Active: false},
+			wantStatus: http.StatusForbidden,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			if test.government != nil {
+				if err := s.UpsertUserProfileAudited(*test.government, "birth", store.AuditActor{ID: "test", Role: "SYSTEM"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.citizen != nil {
+				supabaseID := "user-1"
+				test.citizen.SupabaseUserID = &supabaseID
+				if err := s.UpsertCitizenAccount(*test.citizen); err != nil {
+					t.Fatal(err)
+				}
+			}
+			registry := &apiRegistry{records: map[[32]byte]chain.Record{}, current: map[string][32]byte{}}
+			handler := newHandler(registry, s, apiVerifier{user: &auth.User{ID: "user-1"}}, "0xcontract")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/account", nil, ""))
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", response.Code, test.wantStatus, response.Body.String())
+			}
+		})
 	}
 }
 

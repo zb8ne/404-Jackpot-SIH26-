@@ -6,6 +6,8 @@ This document is the frontend/backend contract for the implemented API, includin
 
 Protected requests require `Authorization: Bearer <Supabase access token>`. The backend validates the token, loads the backend-owned SQLite profile by Supabase `sub`, and derives role and department from that profile.
 
+Government and citizen records remain separate. `GET /account` is the unified session bootstrap endpoint; government-only operations continue to load `user_profiles` through RBAC middleware.
+
 - `CONTROLLER`: system-wide audit and monitoring only.
 - `ADMIN`: credential operations and audit history for its own department.
 - `OFFICIAL`: issue, verify, and department credential reads; no revoke, supersede, audit, or monitoring access.
@@ -70,6 +72,45 @@ curl http://localhost:8088/departments
 ```
 
 ## Identity
+
+### GET `/account`
+
+Purpose: resolve an authenticated Supabase identity to exactly one backend-owned government or citizen account. Authentication: required. Scope: the caller only.
+
+Government response `200`:
+
+```json
+{
+  "accountType":"GOVERNMENT",
+  "id":"supabase-user-id",
+  "email":"official@example.gov",
+  "governmentProfile":{
+    "id":"supabase-user-id",
+    "email":"official@example.gov",
+    "name":"Birth Official",
+    "role":"OFFICIAL",
+    "active":true,
+    "department":{"id":"birth","name":"Birth Registration Dept","docType":1,"docTypeName":"birth_certificate"}
+  },
+  "citizenProfile":null
+}
+```
+
+Citizen response `200`:
+
+```json
+{
+  "accountType":"CITIZEN",
+  "id":"citizen-asha",
+  "email":"asha@example.test",
+  "governmentProfile":null,
+  "citizenProfile":{"id":"citizen-asha","email":"asha@example.test","displayName":"Asha Menon","active":true}
+}
+```
+
+Errors: `401` authentication failure; `403` no linked account or inactive account; `409` the same Supabase identity is linked to both account tables; `500` lookup failure.
+
+The selected login card is presentation state only. The frontend compares it with this backend response and signs out on a mismatch; it never grants a role.
 
 ### GET `/me`
 
