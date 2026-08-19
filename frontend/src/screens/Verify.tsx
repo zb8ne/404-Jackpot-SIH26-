@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import { docTypeLabel, verifyById, verifyFile, type VerifyResult } from '../api'
+import { docTypeLabel, verifyFile, type VerifyResult } from '../api'
 import { Hash, HashDiff } from '../components/Hash'
 import { verdictOf } from '../verdicts'
 
@@ -12,6 +12,10 @@ export function Verify() {
   const input = useRef<HTMLInputElement>(null)
 
   const check = useCallback(async (file: File) => {
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      setError('Choose the complete stamped PDF issued by the registry.')
+      return
+    }
     setBusy(true)
     setError('')
     setResult(null)
@@ -25,22 +29,13 @@ export function Verify() {
     }
   }, [])
 
-  const checkId = useCallback(async (docId: string) => {
-    setBusy(true)
-    setError('')
-    setResult(null)
-    setName(docId)
-    try {
-      setResult(await verifyById(docId))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }, [])
-
   return (
     <div className="space-y-8">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-widest text-sky-400">Exact-file authenticity check</p>
+        <h2 className="mt-2 text-3xl font-black text-slate-100">Verify a stamped PDF</h2>
+        <p className="mt-3 max-w-3xl text-slate-400">Upload the complete stamped PDF. The backend hashes every byte and compares that hash with the blockchain record. A QR image or document ID can identify a record, but cannot prove that the surrounding PDF was not changed.</p>
+      </div>
       <div
         onDragOver={(e) => {
           e.preventDefault()
@@ -70,8 +65,8 @@ export function Verify() {
             if (file) void check(file)
           }}
         />
-        <p className="text-2xl font-semibold text-slate-200">Drop a document here</p>
-        <p className="mt-2 text-slate-400">or click to choose a PDF</p>
+        <p className="text-2xl font-semibold text-slate-200">Drop the complete stamped PDF here</p>
+        <p className="mt-2 text-slate-400">or click to choose the exact file you received</p>
         {name && <p className="mt-4 font-mono text-sm text-slate-500">{name}</p>}
       </div>
 
@@ -81,18 +76,12 @@ export function Verify() {
         <div className="rounded-xl border border-red-500/50 bg-red-500/10 p-4 text-red-300">{error}</div>
       )}
 
-      {result && <Verdict result={result} onVerifyId={checkId} />}
+      {result && <Verdict result={result} />}
     </div>
   )
 }
 
-function Verdict({
-  result,
-  onVerifyId,
-}: {
-  result: VerifyResult
-  onVerifyId?: (docId: string) => void
-}) {
+function Verdict({ result }: { result: VerifyResult }) {
   const v = verdictOf(result.status)
   const tampered = result.status === 'TAMPERED'
 
@@ -108,6 +97,14 @@ function Verdict({
 
       <p className="mt-6 text-lg text-slate-400">{result.message}</p>
 
+      <div className={`mt-6 rounded-xl border p-4 text-sm ${tampered ? 'border-red-500/40 bg-red-500/10 text-red-200' : 'border-slate-700 bg-slate-950/30 text-slate-300'}`}>
+        {tampered
+          ? 'The embedded document ID exists, but these PDF bytes do not match the anchored file. Do not treat its QR or visible contents as authentic.'
+          : result.computedHash
+            ? 'The uploaded bytes match a file that was actually issued. The verdict above also reports whether that authentic file is current, superseded, or revoked.'
+            : 'This result identifies registry state only; no uploaded bytes were authenticated.'}
+      </div>
+
       {result.supersededBy && (
         <div className="mt-6 rounded-xl border border-amber-500/40 bg-amber-500/10 p-5">
           <p className="text-lg text-amber-200">
@@ -116,12 +113,7 @@ function Verdict({
           <p className="mt-1 text-sm text-amber-200/70">
             Current hash <Hash value={result.supersededBy.hash} />
           </p>
-          {onVerifyId && <button
-            onClick={() => onVerifyId(result.supersededBy!.docId)}
-            className="mt-4 rounded-lg bg-amber-500/20 px-4 py-2 font-semibold text-amber-100 transition hover:bg-amber-500/30"
-          >
-            Verify the current version →
-          </button>}
+          <p className="mt-3 text-sm text-amber-100">Download the replacement from its holder and upload that complete PDF to authenticate it.</p>
         </div>
       )}
 

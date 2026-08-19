@@ -120,7 +120,7 @@ Looking up the ID first would misclassify a genuine superseded original because 
 
 - `frontend/src/screens/Login.tsx`: role-intent selection for Controller, Government Authority (Admin/Official), and Citizen followed by Supabase email/password sign-in. The selection is session-scoped presentation state only; backend profile resolution remains authoritative.
 - The authenticated shell displays backend-owned identity and department context. Government roles receive only their allowed workspaces; citizens receive separate My Credentials and Inbox navigation placeholders for the following phases.
-- `frontend/src/screens/Verify.tsx`: PDF upload/drop verification and result display, with a helper path for verifying an ID.
+- `frontend/src/screens/Verify.tsx`: exact stamped-PDF upload/drop verification with explicit byte-authenticity guidance, hash comparison, and separate lifecycle verdict explanation. It does not present ID/QR lookup as proof of PDF integrity.
 - `frontend/src/screens/Issue.tsx`: department selection, citizen/document fields, PDF upload, client-side ID generation, and a stamped-document result with exact-PDF download plus copy actions for the document ID, anchored hash, and transaction hash.
 - `frontend/src/screens/Citizen.tsx`: citizen selection and credential history.
 - `frontend/src/screens/CitizenDashboard.tsx` and `CitizenInbox.tsx`: authenticated citizen-owned PDFs and persisted verification decisions.
