@@ -8,7 +8,9 @@ This file preserves repository context for future Codex sessions. Treat the chec
 
 Verification distinguishes an authentic current document from an authentic superseded or revoked document, a modified document, and a document that was never issued. Superseding adds a replacement without deleting the original, preserving credential history.
 
-The repository is currently a local demo built around Anvil. Phase 1 Supabase/RBAC, Phase 2 audit/monitoring, and Phase 3 QR-based citizen-consent verification are implemented.
+The repository is a demo built around Anvil. Phase 1 Supabase/RBAC, Phase 2 audit/monitoring, and Phase 3 QR-based citizen-consent verification are implemented. It can run locally as a Docker Compose stack or directly on the host, and it includes container/Vercel configuration for hosted demonstrations.
+
+This guide currently describes the `demo-ui` line of development. The Demo UI commits are present on `demo-ui` but are not yet merged into `main` as of commit `f58f8d1`.
 
 ## 2. CURRENT ARCHITECTURE
 
@@ -19,6 +21,9 @@ The repository is currently a local demo built around Anvil. Phase 1 Supabase/RB
 - There is currently no router. The application switches between tabs in `App.tsx`.
 - Supabase client setup is in `frontend/src/lib/supabase.ts`.
 - Backend request functions and shared response types, including `/health`, are centralized in `frontend/src/api.ts`.
+- `/demo` is selected through pathname handling in `App.tsx` and lazy-loads `frontend/src/screens/Demo.tsx`; it is not a React Router route.
+- The Demo UI uses PixiJS 8 and the scene implementation under `frontend/src/scene/`. The authenticated application lazy-loads a collapsible `LiveFloor`; `/demo` provides a standalone guided/projector view that can also run without authentication in preview mode.
+- `frontend/vercel.json` builds the Vite application and rewrites all paths to `index.html`, which preserves the pathname-based `/demo`, `/verify`, and `/consent/...` entry points on Vercel.
 
 ### Backend
 
@@ -40,6 +45,14 @@ SQLite stores stamped PDFs and metadata, stable departments, government profiles
 
 `contracts/src/CredentialRegistry.sol` stores credential hashes and lifecycle state. Foundry tests are in `contracts/test/CredentialRegistry.t.sol`; deployment is in `contracts/script/Deploy.s.sol`. The demo uses local Anvil accounts and keys currently embedded in the Go chain package.
 
+### Runtime and deployment topology
+
+- `docker-compose.yml` is the preferred local path. It starts Anvil, deploys the contract, provisions configured profiles plus demo citizens, starts the backend, conditionally seeds documents through the authenticated REST API, and starts the Vite frontend.
+- Doppler is only an environment-injection mechanism in this repository: `doppler run -- docker compose up` supplies the same variables that a local untracked `.env` file can supply. There is no committed Doppler project configuration or runtime dependency in application code.
+- `backend/Dockerfile` and `frontend/Dockerfile` build the split local Compose services.
+- The root `Dockerfile` plus `deploy/standalone/start.sh` are a standalone hosted-backend target used for Railway-style deployment. One container starts a loopback-only Anvil node, restores/persists its state under `DATA_DIR`, deploys the registry on first boot, and then starts the Go server. A persistent volume is required if chain and SQLite state must survive replacement/restart.
+- The backend honors a platform-provided `PORT` before `ADDR`. The root standalone image exposes `8088`, but the effective listener may be assigned by the hosting platform.
+
 ### Current interaction
 
 1. The frontend signs a user into Supabase and receives a session.
@@ -50,6 +63,7 @@ SQLite stores stamped PDFs and metadata, stable departments, government profiles
 6. Verification reads the authoritative hash/status from the contract and supplements it with SQLite metadata when available.
 7. Important credential operations and profile authorization changes append hash-chained SQLite audit events with the human actor, department, outcome, and relevant credential/transaction references.
 8. A QR verification URL leads an authenticated Admin/Official into a one-time request. The citizen approves or denies through an expiring email token; approved completion rereads the requested hash's current Solidity status.
+9. Successful frontend operations publish typed scene events to an in-process bus. The Demo UI translates them into queued PixiJS animations; eligible roles also receive best-effort cross-tab events from audit polling.
 
 ## 3. EXISTING FUNCTIONALITY
 
@@ -109,7 +123,20 @@ Looking up the ID first would misclassify a genuine superseded original because 
 - `frontend/src/screens/Citizen.tsx`: citizen selection and credential history.
 - `frontend/src/screens/Monitoring.tsx` and `frontend/src/screens/AuditEvents.tsx`: minimal temporary Phase 2 browser-validation UI, intentionally replaceable by the frontend team's final dashboard.
 - `frontend/src/screens/Lifecycle.tsx`: minimal temporary Admin-only revoke/supersede validation forms using the existing Phase 2 API contracts.
+- `frontend/src/screens/Demo.tsx`: standalone `/demo` PixiJS registry-floor presentation with a nine-step role-aware guided walkthrough and a manual preview-event panel.
+- `frontend/src/scene/LiveFloor.tsx`: collapsible live visualization inside the authenticated application shell.
 - `frontend/src/verdicts.ts`: centralized verdict display configuration.
+
+### Demo UI event model
+
+- `frontend/src/scene/sceneApi.ts` defines the `SceneEvent` vocabulary for issue, verify, supersede, revoke, and consent activity.
+- `frontend/src/api.ts` remains the application API boundary and emits scene events after the relevant API calls. Do not bypass it with new component-level `fetch()` calls merely to drive the visualization.
+- `frontend/src/scene/apiBus.ts` is an in-memory publish/subscribe bus. It is the primary source for actions performed in the current tab and includes an eight-second duplicate guard.
+- `frontend/src/scene/auditPoll.ts` polls `/audit-events` every four seconds as a secondary source for actions performed elsewhere, such as a citizen decision. It is available only to roles allowed to read audit events and stops after a `403`; OFFICIAL users therefore rely on the in-tab bus.
+- `frontend/src/scene/choreography.ts` queues events and plays one animation at a time using simulated Pixi ticker time. A backgrounded browser tab may pause animation because `requestAnimationFrame` is suspended.
+- `frontend/src/scene/guidedScript.ts` performs real backend calls only when the current profile has permission. ADMIN can run the complete sequence; OFFICIAL runs issue/verify/consent steps and previews lifecycle steps; CONTROLLER and anonymous visitors preview the sequence.
+- `frontend/public/demo/blank-credential.pdf` is the input used by real guided issue/supersede steps. Real guided mode also requires seeded citizen accounts and valid backend/Supabase configuration.
+- The vendored LimeZu tilesets and sprites are licensed for non-commercial use only. See `frontend/src/scene/assets/tilesets/LIMEZUASSETS-LICENSE.txt`; replace them before any commercial use.
 
 ### Current backend endpoints
 
@@ -294,13 +321,30 @@ Do not invent response fields or endpoints. If the frontend needs a role, depart
 
 ## 12. LOCAL DEVELOPMENT AND CONFIGURATION
 
-- The local demo requires Go 1.22+, Node 20+, Foundry/Anvil, and a reachable Supabase project.
+- The preferred local path requires Docker, Docker Compose, and a reachable Supabase project. Doppler is optional; it can inject configuration instead of a local `.env`.
+- Copy `.env.example` to an untracked `.env` when not using Doppler. Required values are `SUPABASE_URL`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_PUBLISHABLE_KEY`. Government `SEED_*_USER_ID` values are optional and each non-empty ID provisions that profile. Demo-document seeding runs only when all three department `SEED_*_TOKEN` values are present; the tokens are short-lived and must correspond to their Admin profiles.
+- With Doppler configured for the repository, start the complete stack from the repository root with `doppler run -- docker compose up`. Without Doppler, use `docker compose up`; Compose automatically reads `.env`.
+- The Compose dependency order is `init-volumes`/`anvil` -> `deploy` -> `profiles` -> `backend` -> `seed`, with `frontend` depending on the backend. `deploy`, `profiles`, and `seed` are expected one-shot containers that exit successfully.
+- Default local addresses are frontend `http://127.0.0.1:5173`, backend `http://127.0.0.1:8088`, and Anvil `http://127.0.0.1:8545`. Override collisions with `WEB_PORT`, `API_PORT`, or `ANVIL_PORT`; keep `VITE_API_URL` and `PUBLIC_WEB_URL` consistent with browser-reachable addresses.
+- Use `docker compose down` to stop while retaining named-volume state. `docker compose down -v` also deletes the Compose chain, deployment, and SQLite volumes and is intentionally destructive to demo state. Inspect a service with `docker compose logs -f backend` (or another service name).
+- The direct-host fallback requires Go 1.22+, Node 20+, Foundry/Anvil, and the same Supabase values. Run `make demo` from the repository root and `make stop` when finished. Be aware that `make demo` begins with `clean` and deletes local demo state/artifacts before rebuilding.
 - The backend requires `SUPABASE_URL`. It also supports `RPC_URL`, `DB_PATH`, `CONTRACT_ADDRESS` or `DEPLOYMENT_FILE`, and `ADDR`.
 - The frontend requires `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`; `VITE_API_URL` optionally overrides the backend URL. The backend `PUBLIC_WEB_URL` explicitly controls QR/consent URLs. Keep local `.env` files untracked.
 - A Supabase account's JWT `sub` must exactly match `user_profiles.supabase_user_id`. The backend never derives application roles from JWT metadata.
-- `make demo` starts Anvil, deploys the contract, provisions three department Admin profiles, seeds authenticated demo credentials, and starts the backend and frontend. It requires matching `SEED_*_USER_ID` and `SEED_*_TOKEN` environment variables for the three demo departments.
+- The direct-host `make demo` path still expects the three department Admin IDs and tokens. Flexible partial-profile provisioning is currently specific to Docker Compose.
 - `backend/cmd/profile-seed` is the non-interactive local profile provisioning path. Profile changes and their audit entries commit atomically.
-- Use `make stop` to stop local services. Direct validation commands remain `GOCACHE=/tmp/credreg-go-cache go test ./...` from `backend`, `npm run build` from `frontend`, and `forge test` from `contracts` only when Solidity changes.
+- Direct validation commands remain `GOCACHE=/tmp/credreg-go-cache go test ./...` from `backend`, `npm run build` and `npm run lint` from `frontend`, and `forge test` from `contracts` when Solidity changes.
+
+### Quick local run checklist
+
+1. Ensure at least one Supabase government account exists and copy its stable user ID. A full seeded fixture requires all three department Admins.
+2. For the full fixture only, obtain fresh access tokens for all three Admin accounts.
+3. Configure the applicable variables from `.env.example` in Doppler, or place them in an untracked `.env`.
+4. Run `doppler run -- docker compose up` or `docker compose up` from the repository root.
+5. Wait for the one-shot `deploy`, `profiles`, and `seed` services to exit successfully and for the three long-running services to remain up.
+6. Open `http://127.0.0.1:5173` for the authenticated app or `http://127.0.0.1:5173/demo` for the registry-floor presentation.
+7. Use preview mode at `/demo` without signing in. Sign in as ADMIN or OFFICIAL only when intentionally exercising the guided script against the live backend; those live steps create and mutate demo credentials.
+8. Stop with `docker compose down`. Add `-v` only when deliberately resetting the local chain and database.
 
 ## 13. GIT / DEVELOPMENT RULES
 
@@ -359,6 +403,10 @@ Do not invent response fields or endpoints. If the frontend needs a role, depart
 - Consent-gated verification requests, expiring hashed tokens, atomic approve/deny/complete transitions, and current-chain completion.
 - Minimal QR landing, request status/completion, and public citizen consent screens.
 - In-memory authenticated development notification capture with redacted persistent attempts.
+- Docker Compose orchestration for Anvil, deployment, profile/citizen provisioning, backend, authenticated document seeding, and the Vite frontend.
+- Optional Doppler-driven environment injection, with `.env.example` as the non-Doppler configuration template.
+- Split backend/frontend container images, Vercel SPA rewrite configuration, and a standalone root image that co-locates Anvil and the Go backend for Railway-style hosting.
+- A PixiJS registry-floor Demo UI on the unmerged `demo-ui` branch, including preview controls, role-aware guided execution, an authenticated live floor, API-bus events, and audit-poll fallback.
 
 ### B. Partially implemented / known limitations
 
@@ -371,6 +419,10 @@ Do not invent response fields or endpoints. If the frontend needs a role, depart
 - Monitoring, Audit Events, Revoke, and Supersede frontend screens are intentionally minimal temporary validation UI, not the frontend team's final dashboard.
 - Development notifications do not send real email and disappear on backend restart.
 - Existing unlinked credentials cannot use secure consent until linked explicitly with controlled tooling.
+- The Demo UI visualization has been browser-validated in preview mode, but the commit history does not establish a complete browser-validated live walkthrough for every RBAC role and hosted environment.
+- `/demo` and the consent/verification entry paths still use manual pathname handling rather than a router.
+- Demo scene art is licensed for non-commercial use only and is unsuitable for a commercial release without replacement.
+- Doppler supplies environment variables only; the repository contains no committed Doppler project definition. Hosted service configuration outside the checked-in Docker/Vercel files remains external state.
 
 ### C. Planned/not implemented
 
@@ -378,10 +430,11 @@ Do not invent response fields or endpoints. If the frontend needs a role, depart
 - Real email provider integration and production notification delivery/retry policy.
 - A final routed frontend architecture; Phase 3 uses minimal pathname/query handling.
 - Production wallet/key management.
+- Replacement or appropriately licensed production artwork for the Demo UI.
 
 ## 16. CURRENT NEXT PHASE
 
-Phase 1 — RBAC Foundation, Phase 2 — Audit + Administrative Monitoring, and Phase 3 — QR Citizen Consent are implemented. The next phase must be explicitly agreed before implementation.
+Phase 1 — RBAC Foundation, Phase 2 — Audit + Administrative Monitoring, and Phase 3 — QR Citizen Consent are implemented. Docker/Vercel/Railway-oriented demo deployment work is present on `main`. The PixiJS Demo UI is implemented on `demo-ui` through commit `f58f8d1` but is not merged into `main`. The next functional phase must be explicitly agreed before implementation.
 
 Before changing code in a future session:
 
@@ -394,6 +447,6 @@ Before changing code in a future session:
 
 ## CURRENT STATE / NEXT TASK
 
-**Current state:** Core lifecycle, URL/bare-ID compatible stamping, SQLite persistence, blockchain anchoring, Supabase government authentication, backend RBAC, audit/monitoring, citizen accounts and document linkage, consent requests, hashed one-time email tokens, current-chain completion, and minimal Phase 2/3 validation UI are implemented.
+**Current state:** Core lifecycle, URL/bare-ID compatible stamping, SQLite persistence, blockchain anchoring, Supabase government authentication, backend RBAC, audit/monitoring, citizen accounts and document linkage, consent requests, hashed one-time email tokens, current-chain completion, Docker/hosted-demo configuration, and minimal Phase 2/3 validation UI are implemented. This `demo-ui` branch additionally contains the PixiJS registry-floor visualization, preview driver, live event bridge, audit fallback, and role-aware guided walkthrough.
 
-**Next task:** Validate Phase 3 end-to-end, then agree on the next bounded phase. Do not add real notification infrastructure or redesign the frontend without explicit scope.
+**Next task:** Validate the Demo UI's live guided path end-to-end with configured Supabase accounts and the Docker Compose stack, decide whether/how to merge `demo-ui`, then agree on the next bounded phase. Do not add real notification infrastructure or redesign the frontend without explicit scope.
