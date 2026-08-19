@@ -4,7 +4,6 @@ import { Citizen } from './screens/Citizen'
 import { Issue } from './screens/Issue'
 import { Verify } from './screens/Verify'
 import { Login } from './screens/Login'
-import { Demo } from './screens/Demo'
 import { AuditEvents } from './screens/AuditEvents'
 import { Monitoring } from './screens/Monitoring'
 import { Revoke, Supersede } from './screens/Lifecycle'
@@ -16,6 +15,9 @@ import { lazy, Suspense } from 'react'
 // Pixi + the scene engine are a lot of bytes for a form-filling app to load up
 // front; only the account holders who actually see live activity pay for it.
 const LiveFloor = lazy(() => import('./scene/LiveFloor').then((m) => ({ default: m.LiveFloor })))
+// Same reasoning as LiveFloor: /demo pulls in the whole Pixi scene, and most
+// visitors to the authenticated app never go near it.
+const Demo = lazy(() => import('./screens/Demo').then((m) => ({ default: m.Demo })))
 
 const TABS = [
   { id: 'verify', label: 'Verify', hint: 'check a document' },
@@ -86,7 +88,11 @@ export default function App() {
   }, [profile])
 
   if (isDemo) {
-    return <Demo />
+    return (
+      <Suspense fallback={null}>
+        <Demo />
+      </Suspense>
+    )
   }
 
   if (consentToken) {
