@@ -162,7 +162,7 @@ func appendRegistryPage(orig []byte, docID, qrPayload string) ([]byte, error) {
 	if maxObj == 0 {
 		return nil, fmt.Errorf("no objects found")
 	}
-	fontNum, contentNum, pageNum := maxObj+1, maxObj+2, maxObj+3
+	fontNum, contentNum, embeddedQRNum, fileSpecNum, attachmentNum, pageNum := maxObj+1, maxObj+2, maxObj+3, maxObj+4, maxObj+5, maxObj+6
 
 	// Rewrite the page tree in place, keeping every other key it carries.
 	newKids := strings.TrimSpace(pagesBody[kids[2]:kids[3]]) + fmt.Sprintf(" %d 0 R", pageNum)
@@ -172,6 +172,11 @@ func appendRegistryPage(orig []byte, docID, qrPayload string) ([]byte, error) {
 		strconv.Itoa(oldCount+1) + updatedPages[count[3]+shift:]
 
 	stream := registryPageContent(docID, qrPayload)
+	qrPNG, err := qrcode.Encode(qrPayload, qrcode.Medium, 512)
+	if err != nil {
+		return nil, fmt.Errorf("encode QR attachment: %w", err)
+	}
+	qrFilename := safeAttachmentName(docID) + "-qr.png"
 
 	var out bytes.Buffer
 	out.Write(orig)
@@ -197,10 +202,13 @@ func appendRegistryPage(orig []byte, docID, qrPayload string) ([]byte, error) {
 	write(pagesNumInt, updatedPages)
 	write(fontNum, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
 	write(contentNum, fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream))
+	write(embeddedQRNum, fmt.Sprintf("<< /Type /EmbeddedFile /Subtype /image#2Fpng /Length %d >>\nstream\n%s\nendstream", len(qrPNG), string(qrPNG)))
+	write(fileSpecNum, fmt.Sprintf("<< /Type /Filespec /F (%s) /UF (%s) /Desc (Credential verification QR code) /EF << /F %d 0 R /UF %d 0 R >> >>", escape(qrFilename), escape(qrFilename), embeddedQRNum, embeddedQRNum))
+	write(attachmentNum, fmt.Sprintf("<< /Type /Annot /Subtype /FileAttachment /Rect [72 414 250 448] /Contents (Download QR PNG) /FS %d 0 R /Name /Paperclip >>", fileSpecNum))
 	write(pageNum, fmt.Sprintf(
 		"<< /Type /Page /Parent %s 0 R /MediaBox [0 0 612 792] "+
-			"/Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>",
-		pagesNum, fontNum, contentNum))
+			"/Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R /Annots [%d 0 R] >>",
+		pagesNum, fontNum, contentNum, attachmentNum))
 
 	// Cross-reference entries must be written in ascending object order, grouped
 	// into contiguous subsections.
@@ -248,7 +256,23 @@ func registryPageContent(docID, qrPayload string) string {
 
 	b.WriteString("BT\n/F1 11 Tf\n72 458 Td\n")
 	fmt.Fprintf(&b, "(%s%s) Tj\nET\n", docid.Marker, escape(docID))
+	b.WriteString("BT\n/F1 11 Tf\n102 428 Td\n(Download QR PNG - open the attachment icon) Tj\nET\n")
 
+	return b.String()
+}
+
+func safeAttachmentName(docID string) string {
+	var b strings.Builder
+	for _, r := range docID {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	if b.Len() == 0 {
+		return "credential"
+	}
 	return b.String()
 }
 
