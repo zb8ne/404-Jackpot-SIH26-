@@ -126,7 +126,7 @@ Looking up the ID first would misclassify a genuine superseded original because 
 - `frontend/src/screens/CitizenDashboard.tsx` and `CitizenInbox.tsx`: authenticated citizen-owned PDFs and persisted verification decisions.
 - `frontend/src/screens/GovernmentRequests.tsx`: Admin/Official request history, state filters, refresh, and approved-request completion independent of the original QR browser session.
 - `frontend/src/screens/Monitoring.tsx` and `frontend/src/screens/AuditEvents.tsx`: minimal temporary Phase 2 browser-validation UI, intentionally replaceable by the frontend team's final dashboard.
-- `frontend/src/screens/Lifecycle.tsx`: minimal temporary Admin-only revoke/supersede validation forms using the existing Phase 2 API contracts.
+- `frontend/src/screens/Lifecycle.tsx`: Admin-only revoke/supersede flows driven by selectable valid credentials from the authenticated department rather than manually entered hashes.
 - `frontend/src/screens/Demo.tsx`: standalone `/demo` PixiJS registry-floor presentation with a nine-step role-aware guided walkthrough and a manual preview-event panel.
 - `frontend/src/scene/LiveFloor.tsx`: collapsible live visualization inside the authenticated application shell.
 - `frontend/src/verdicts.ts`: centralized verdict display configuration.
@@ -153,6 +153,7 @@ Looking up the ID first would misclassify a genuine superseded original because 
 - `POST /revoke`
 - `POST /supersede`
 - `GET /credentials/{citizen}`
+- `GET /department/credentials` (department-scoped lifecycle selection data)
 - `GET /citizen/credentials` (authenticated citizen's own linked documents)
 - `GET /citizen/documents/{hash}/download` (ownership-scoped citizen PDF download)
 - `GET /documents/{hash}/download`

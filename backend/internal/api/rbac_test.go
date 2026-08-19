@@ -151,6 +151,7 @@ func TestProtectedRoutesRejectUnauthenticatedRequests(t *testing.T) {
 		{http.MethodPost, "/revoke"},
 		{http.MethodPost, "/supersede"},
 		{http.MethodGet, "/credentials/Citizen"},
+		{http.MethodGet, "/department/credentials"},
 		{http.MethodGet, "/documents/hash/download"},
 		{http.MethodGet, "/citizen-accounts"},
 		{http.MethodPost, "/verification-requests"},
@@ -191,6 +192,11 @@ func TestOfficialCanIssueAndVerifyButCannotMutateLifecycle(t *testing.T) {
 	handler.ServeHTTP(response, authorizedRequest(http.MethodPost, "/issue", body, contentType))
 	if response.Code != http.StatusCreated {
 		t.Fatalf("issue status = %d, body = %s", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/department/credentials", nil, ""))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"docId":"DOC-1"`) {
+		t.Fatalf("department credentials status = %d, body = %s", response.Code, response.Body.String())
 	}
 
 	verifyBody := &bytes.Buffer{}

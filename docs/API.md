@@ -141,6 +141,12 @@ curl -H 'Authorization: Bearer <token>' http://localhost:8088/me
 
 ## Department credential reads
 
+### GET `/department/credentials`
+
+Purpose: list all stored credentials for the authenticated government user's department, enriched with current on-chain status. Authentication: required. Roles: Admin or Official. The backend derives the document type from the backend-owned department profile.
+
+Response `200`: `{"documents":[<credential objects>]}`. Errors: `401`; `403`; `500` storage failure.
+
 ### GET `/citizen/credentials`
 
 Purpose: list every stamped credential issued to the authenticated citizen account, enriched with current on-chain status. Authentication: required. Account type: active Citizen. Ownership is derived from the verified Supabase `sub`; the request accepts no citizen identifier.

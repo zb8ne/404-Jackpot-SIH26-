@@ -92,6 +92,7 @@ func newHandlerConfigured(c registry, s *store.Store, verifier auth.TokenVerifie
 	mux.Handle("POST /revoke", audited(rbac.PermissionRevoke, actionRevoke, srv.revoke))
 	mux.Handle("POST /supersede", audited(rbac.PermissionSupersede, actionSupersede, srv.supersede))
 	mux.Handle("GET /credentials/{citizen}", protected(rbac.PermissionViewDept, srv.credentials))
+	mux.Handle("GET /department/credentials", protected(rbac.PermissionViewDept, srv.departmentCredentials))
 	mux.Handle("GET /documents/{hash}/download", protected(rbac.PermissionViewDept, srv.download))
 	mux.Handle("GET /audit-events", authenticated(http.HandlerFunc(srv.auditEventsAccess)))
 	mux.Handle("GET /monitoring/overview", protected(rbac.PermissionMonitorAll, srv.monitoringOverview))
@@ -794,6 +795,33 @@ func (s *Server) credentials(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"citizen": citizen, "documents": out})
+}
+
+func (s *Server) departmentCredentials(w http.ResponseWriter, r *http.Request) {
+	_, docTypeName, ok := requestDepartment(w, r)
+	if !ok {
+		return
+	}
+	docs, err := s.store.ByDocType(docTypeName)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load department credentials")
+		return
+	}
+	type entry struct {
+		store.Document
+		Status string `json:"status"`
+	}
+	out := []entry{}
+	for _, doc := range docs {
+		item := entry{Document: doc, Status: "UNKNOWN"}
+		if hash, err := parseHash(doc.DocHash); err == nil {
+			if record, err := s.reader.Verify(r.Context(), hash); err == nil && record.Found {
+				item.Status = statusName(record.Status)
+			}
+		}
+		out = append(out, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"documents": out})
 }
 
 func (s *Server) citizenCredentials(w http.ResponseWriter, r *http.Request) {

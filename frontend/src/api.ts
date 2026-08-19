@@ -296,6 +296,9 @@ export const getCredentials = (citizen: string) =>
 export const getMyCredentials = () =>
   request<{ citizen: string; documents: Credential[] }>('/citizen/credentials').then((r) => r.documents)
 
+export const getDepartmentCredentials = () =>
+  request<{ documents: Credential[] }>('/department/credentials').then((r) => r.documents)
+
 export const verifyFile = (file: File) => {
   const form = new FormData()
   form.append('file', file)
