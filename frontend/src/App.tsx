@@ -11,6 +11,11 @@ import { Revoke, Supersede } from './screens/Lifecycle'
 import { Consent } from './screens/Consent'
 import { VerificationRequestFlow } from './screens/VerificationRequest'
 import { supabase } from './lib/supabase'
+import { lazy, Suspense } from 'react'
+
+// Pixi + the scene engine are a lot of bytes for a form-filling app to load up
+// front; only the account holders who actually see live activity pay for it.
+const LiveFloor = lazy(() => import('./scene/LiveFloor').then((m) => ({ default: m.LiveFloor })))
 
 const TABS = [
   { id: 'verify', label: 'Verify', hint: 'check a document' },
@@ -154,6 +159,10 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-6xl px-6 py-10">
+        <Suspense fallback={null}>
+          <LiveFloor />
+        </Suspense>
+
         {profileError && (
           <div className="rounded-xl border border-red-500/50 bg-red-500/10 p-4 text-red-300">
             {profileError}

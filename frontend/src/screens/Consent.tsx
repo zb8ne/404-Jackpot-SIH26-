@@ -14,7 +14,7 @@ export function Consent({ token }: { token: string }) {
   async function decide(decision: 'approve' | 'deny') {
     setBusy(true); setError('')
     try {
-      const response = await decideConsent(token, decision)
+      const response = await decideConsent(token, decision, details?.requestId)
       setResult(response.state)
       setDetails((current) => current ? { ...current, state: response.state } : current)
     } catch (e) { setError(message(e)) } finally { setBusy(false) }

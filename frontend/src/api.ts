@@ -1,4 +1,6 @@
 import { supabase } from './lib/supabase'
+import { emitSceneEvent } from './scene/apiBus'
+import type { DeptId, Verdict as SceneVerdict } from './scene/sceneApi'
 
 // The one place that knows where the backend lives.
 export const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8088'
@@ -194,6 +196,15 @@ export type MonitoringOverview = {
   recentActivity: AuditEvent[]
 }
 
+const SCENE_VERDICTS = new Set<SceneVerdict>(['VALID', 'SUPERSEDED', 'REVOKED', 'TAMPERED', 'NOT_ISSUED'])
+
+/** api.ts's Verdict includes UNKNOWN (a backend escape hatch); the scene's
+ *  vocabulary deliberately does not, since there is nothing sensible to
+ *  animate for it. */
+function asSceneVerdict(status: Verdict): SceneVerdict | null {
+  return SCENE_VERDICTS.has(status as SceneVerdict) ? (status as SceneVerdict) : null
+}
+
 async function json<T>(res: Response): Promise<T> {
   const raw = await res.text()
   let body: unknown = {}
@@ -261,11 +272,19 @@ export const getCredentials = (citizen: string) =>
 export const verifyFile = (file: File) => {
   const form = new FormData()
   form.append('file', file)
-  return request<VerifyResult>('/verify', { method: 'POST', body: form })
+  return request<VerifyResult>('/verify', { method: 'POST', body: form }).then((result) => {
+    const verdict = asSceneVerdict(result.status)
+    if (verdict) emitSceneEvent({ kind: 'VERIFY', docId: result.docId, verdict })
+    return result
+  })
 }
 
 export const verifyById = (docId: string) =>
-  request<VerifyResult>(`/verify/${encodeURIComponent(docId)}`)
+  request<VerifyResult>(`/verify/${encodeURIComponent(docId)}`).then((result) => {
+    const verdict = asSceneVerdict(result.status)
+    if (verdict) emitSceneEvent({ kind: 'VERIFY', docId: result.docId || docId, verdict })
+    return result
+  })
 
 export const issueDocument = (fields: {
   file: File
@@ -283,11 +302,28 @@ export const issueDocument = (fields: {
   form.append('citizen', fields.citizen)
   form.append('citizen_account_id', fields.citizenAccountId)
   return request<IssueResult>('/issue', { method: 'POST', body: form })
+    .then((result) => {
+      emitSceneEvent({ kind: 'ISSUE', dept: fields.dept as DeptId, docId: fields.docId, ok: true })
+      return result
+    })
+    .catch((error: unknown) => {
+      emitSceneEvent({
+        kind: 'ISSUE',
+        dept: fields.dept as DeptId,
+        docId: fields.docId,
+        ok: false,
+        reason: error instanceof Error ? error.message : String(error),
+      })
+      throw error
+    })
 }
 
 export const createVerificationRequest = (documentId: string, purpose: string) =>
   request<{ id: string; state: VerificationRequestState; expiresAt: string; notification: { channel: string; destination: string; status: string } }>('/verification-requests', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ documentId, purpose }),
+  }).then((result) => {
+    emitSceneEvent({ kind: 'CONSENT_REQUEST', docId: documentId })
+    return result
   })
 
 export const getVerificationRequest = (id: string) => request<VerificationRequest>(`/verification-requests/${encodeURIComponent(id)}`)
@@ -295,19 +331,33 @@ export const listVerificationRequests = (state?: VerificationRequestState) => re
 export const completeVerificationRequest = (id: string) => request<{ request: VerificationRequest; verification: VerifyResult }>(`/verification-requests/${encodeURIComponent(id)}/complete`, { method: 'POST' })
 export const getDevelopmentConsentURL = (id: string) => request<{ requestId: string; consentUrl: string; developmentOnly: boolean }>(`/development/notifications/${encodeURIComponent(id)}`)
 export const getConsentDetails = (token: string) => request<ConsentDetails>(`/consent/${encodeURIComponent(token)}`, {}, false)
-export const decideConsent = (token: string, decision: 'approve' | 'deny') => request<{ id: string; state: VerificationRequestState; decisionAt: string }>(`/consent/${encodeURIComponent(token)}/${decision}`, { method: 'POST' }, false)
+export const decideConsent = (token: string, decision: 'approve' | 'deny', docId?: string) =>
+  request<{ id: string; state: VerificationRequestState; decisionAt: string }>(
+    `/consent/${encodeURIComponent(token)}/${decision}`,
+    { method: 'POST' },
+    false,
+  ).then((result) => {
+    if (docId) {
+      emitSceneEvent({ kind: decision === 'approve' ? 'CONSENT_APPROVED' : 'CONSENT_DENIED', docId })
+    }
+    return result
+  })
 
-export const revokeDocument = (docHash: string, dept: string) =>
+export const revokeDocument = (docHash: string, dept: string, docId?: string) =>
   request<RevokeResult>('/revoke', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ docHash, dept }),
+  }).then((result) => {
+    emitSceneEvent({ kind: 'REVOKE', dept: dept as DeptId, docId: docId ?? docHash })
+    return result
   })
 
 export const supersedeDocument = (fields: {
   file: File
   dept: string
   oldHash: string
+  oldDocId?: string
   docId: string
   citizen: string
   citizenAccountId: string
@@ -319,7 +369,15 @@ export const supersedeDocument = (fields: {
   form.append('doc_id', fields.docId)
   form.append('citizen', fields.citizen)
   form.append('citizen_account_id', fields.citizenAccountId)
-  return request<SupersedeResult>('/supersede', { method: 'POST', body: form })
+  return request<SupersedeResult>('/supersede', { method: 'POST', body: form }).then((result) => {
+    emitSceneEvent({
+      kind: 'SUPERSEDE',
+      dept: fields.dept as DeptId,
+      docId: fields.oldDocId ?? fields.oldHash,
+      newDocId: fields.docId,
+    })
+    return result
+  })
 }
 
 export async function downloadDocument(path: string, filename: string) {
