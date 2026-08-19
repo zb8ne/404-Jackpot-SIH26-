@@ -4,6 +4,7 @@ import { Citizen } from './screens/Citizen'
 import { Issue } from './screens/Issue'
 import { Verify } from './screens/Verify'
 import { Login } from './screens/Login'
+import { Demo } from './screens/Demo'
 import { AuditEvents } from './screens/AuditEvents'
 import { Monitoring } from './screens/Monitoring'
 import { Revoke, Supersede } from './screens/Lifecycle'
@@ -27,6 +28,9 @@ export default function App() {
 	const consentMatch = window.location.pathname.match(/^\/consent\/([^/]+)$/)
 	const consentToken = consentMatch ? decodeURIComponent(consentMatch[1]) : ''
 	const qrDocumentId = window.location.pathname === '/verify' ? new URLSearchParams(window.location.search).get('docId') ?? '' : ''
+	// The demo floor is a standalone page: no login, so it can be projected or
+	// handed to a judge without an account.
+	const isDemo = window.location.pathname === '/demo'
   const [session, setSession] = useState<any>(null)
   const [tab, setTab] = useState<Tab>('verify')
   const [contract, setContract] = useState('')
@@ -75,6 +79,10 @@ export default function App() {
     if (!profile) return
     setTab(profile.role === 'CONTROLLER' ? 'monitoring' : 'verify')
   }, [profile])
+
+  if (isDemo) {
+    return <Demo />
+  }
 
   if (consentToken) {
     return <Consent token={consentToken} />
