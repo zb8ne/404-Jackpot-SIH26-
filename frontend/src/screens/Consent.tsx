@@ -36,8 +36,8 @@ export function Consent({ token }: { token: string }) {
         </dl>
         {result ? <div className={`mt-8 rounded-xl p-5 font-bold ${result === 'APPROVED' ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'}`}>Request {result.toLowerCase()}. This one-time link cannot be used to change the decision.</div> :
           <div className="mt-8 grid gap-3 sm:grid-cols-2">
-            <button disabled={busy} onClick={() => void decide('approve')} className="rounded-xl bg-emerald-600 px-6 py-4 font-bold text-white disabled:opacity-50">Approve</button>
-            <button disabled={busy} onClick={() => void decide('deny')} className="rounded-xl bg-red-600 px-6 py-4 font-bold text-white disabled:opacity-50">Deny</button>
+            <button disabled={busy} onClick={() => void decide('approve')} className="rounded-md border-2 border-emerald-900 bg-emerald-600 px-6 py-4 font-bold uppercase tracking-wide text-white shadow-[4px_4px_0_0_rgba(16,185,129,0.5)] transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-0 active:translate-y-0 active:shadow-none disabled:opacity-50 disabled:shadow-none">Approve</button>
+            <button disabled={busy} onClick={() => void decide('deny')} className="rounded-md border-2 border-red-900 bg-red-600 px-6 py-4 font-bold uppercase tracking-wide text-white shadow-[4px_4px_0_0_rgba(220,38,38,0.5)] transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-0 active:translate-y-0 active:shadow-none disabled:opacity-50 disabled:shadow-none">Deny</button>
           </div>}
         <p className="mt-5 text-xs text-slate-500">Consent permits this request only. Credential authenticity is checked separately against the blockchain.</p>
       </>}

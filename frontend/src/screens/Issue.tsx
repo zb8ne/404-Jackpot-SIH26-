@@ -157,7 +157,7 @@ function generateDocId() {
 
           <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-800 bg-slate-900/30 px-6 py-5 sm:px-8">
             <p className="max-w-md text-xs leading-5 text-slate-500">Submitting stamps the PDF first, anchors its SHA-256 hash, and stores the exact issued bytes.</p>
-            <button type="submit" disabled={busy || !file || !citizenAccountId || !docId.trim()} className="rounded-xl bg-sky-500 px-6 py-3.5 font-bold text-slate-950 shadow-lg shadow-sky-950/30 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400">{busy ? 'Anchoring on chain…' : 'Issue & anchor credential →'}</button>
+            <button type="submit" disabled={busy || !file || !citizenAccountId || !docId.trim()} className="rounded-md border-2 border-sky-900 bg-sky-500 px-6 py-3.5 font-bold uppercase tracking-wide text-slate-950 shadow-[4px_4px_0_0_rgba(14,165,233,0.5)] transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:bg-sky-400 active:translate-x-0 active:translate-y-0 active:shadow-none disabled:cursor-not-allowed disabled:border-slate-700 disabled:bg-slate-700 disabled:text-slate-400 disabled:shadow-none">{busy ? 'Anchoring on chain…' : 'Issue & anchor credential →'}</button>
           </div>
         </form>
 

@@ -170,7 +170,7 @@ function LoginForm({
         />
       </label>
 
-      <button type="submit" disabled={busy} className="w-full rounded-xl bg-sky-600 px-6 py-3 font-semibold text-white hover:bg-sky-500 disabled:bg-slate-700">
+      <button type="submit" disabled={busy} className="w-full rounded-md border-2 border-sky-900 bg-sky-600 px-6 py-3 font-bold uppercase tracking-wide text-white shadow-[4px_4px_0_0_rgba(14,165,233,0.5)] transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:bg-sky-500 active:translate-x-0 active:translate-y-0 active:shadow-none disabled:border-slate-700 disabled:bg-slate-700 disabled:shadow-none">
         {busy ? 'Signing in…' : `Sign in as ${copy.title}`}
       </button>
     </form>

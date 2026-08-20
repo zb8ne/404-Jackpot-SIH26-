@@ -30,10 +30,10 @@ export function Citizen() {
           <button
             key={name}
             onClick={() => setSelected(name)}
-            className={`rounded-xl border px-6 py-3 text-lg font-semibold transition ${
+            className={`rounded-md border-2 px-6 py-3 text-lg font-bold transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-0 active:translate-y-0 active:shadow-none ${
               name === selected
-                ? 'border-sky-500 bg-sky-500/10 text-sky-200'
-                : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500'
+                ? 'border-sky-500 bg-sky-500/10 text-sky-200 shadow-[3px_3px_0_0_rgba(14,165,233,0.45)]'
+                : 'border-slate-700 bg-slate-900 text-slate-300 shadow-[3px_3px_0_0_rgba(100,116,139,0.25)] hover:border-slate-500'
             }`}
           >
             {name}
@@ -65,7 +65,7 @@ export function Citizen() {
                 </div>
                 <button
                   onClick={() => void downloadDocument(`/documents/${doc.docHash}/download`, doc.filename).catch((e) => setError(String(e)))}
-                  className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500 hover:text-slate-100"
+                  className="rounded-md border-2 border-slate-700 px-4 py-2 text-sm font-bold uppercase tracking-wide text-slate-300 shadow-[3px_3px_0_0_rgba(100,116,139,0.3)] transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:border-slate-500 hover:text-slate-100 active:translate-x-0 active:translate-y-0 active:shadow-none"
                 >
                   Download ↓
                 </button>
