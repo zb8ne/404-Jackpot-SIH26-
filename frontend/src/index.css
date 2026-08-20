@@ -22,12 +22,22 @@ body {
    the registry floor.
 
    The rules below match Tailwind classes by SUBSTRING (`[class*='...']`)
-   and override with `!important`, so any element that ends up under a
-   `.civic-theme` ancestor and happens to use one of these class name
-   fragments (bg-slate-900, text-slate-4xx/5xx, text-sky-*, etc.) gets
-   silently recolored — intentional or not. Adding a new component inside
-   an existing `.civic-theme` wrapper means it inherits this theme whether
-   or not that was the goal; check here first if a color looks wrong. */
+   and override with `!important`, so any element under a `.civic-theme`
+   ancestor using one of these fragments gets silently recolored. The
+   bg-sky-500/600 rule is the one exception: it matches by EXACT TOKEN
+   (`[class~='...']`) instead, because a substring match there previously
+   caught `bg-sky-500/10` (a subtle 10%-opacity tint) as if it were solid
+   `bg-sky-500`, forcing it fully opaque — combined with `text-sky-300` on
+   the same element also being remapped to a similar coral, badges that
+   were meant to be a faint tinted background with readable coral text
+   instead rendered as solid coral-on-coral with the text nearly
+   invisible. Exact-token matching lets `bg-sky-500/NN` fall through to
+   Tailwind's own translucent color instead. The other rules keep
+   substring matching since nothing else here pairs a translucent
+   background with same-hue text the way bg-sky-500 + text-sky-300 did —
+   but the same class of bug is possible anywhere a new component pairs a
+   `bg-<color>-500/NN` tint with `text-<color>-300` text under this theme;
+   check here first if a badge looks low-contrast. */
 .civic-workspace {
   color: #f4efe7;
   background:
@@ -63,8 +73,8 @@ body {
   color: #ff9a89 !important;
 }
 
-.civic-theme [class*='bg-sky-500'],
-.civic-theme [class*='bg-sky-600'] {
+.civic-theme [class~='bg-sky-500'],
+.civic-theme [class~='bg-sky-600'] {
   background-color: #f07868 !important;
 }
 

@@ -111,7 +111,7 @@ function generateDocId() {
         <form onSubmit={submit} className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/50">
           <div className="border-b border-slate-800 bg-slate-900/50 px-6 py-5">
             <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-md border-2 border-sky-500/40 bg-sky-500/10 text-xl font-black text-sky-300 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.15)]">BC</div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-md border-2 border-[#f07868]/40 bg-[#f07868]/15 text-xl font-black text-[#ff9a89] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.15)]">BC</div>
               <div className="min-w-0"><p className="font-bold text-slate-100">{selected?.name ?? 'Loading department…'}</p><p className="text-sm text-slate-500">Authorized for {selected ? docTypeLabel(selected.docTypeName).toLowerCase() : 'credential issuance'}</p></div>
               <span className="ml-auto rounded-full border border-slate-700 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Locked authority</span>
             </div>
@@ -132,7 +132,7 @@ function generateDocId() {
                 <StepLabel number="02" title="Document identity" />
                 <div className="mt-3 flex gap-2">
                   <Input value={docId} onChange={setDocId} placeholder="BC-2026-000001" required mono />
-                  <button type="button" onClick={generateDocId} className="shrink-0 rounded-md border-2 border-sky-500/40 bg-sky-500/10 px-4 text-sm font-bold uppercase tracking-wide text-sky-300 shadow-[3px_3px_0_0_rgba(14,165,233,0.35)] transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:bg-sky-500/20 active:translate-x-0 active:translate-y-0 active:shadow-none">Generate</button>
+                  <button type="button" onClick={generateDocId} className="shrink-0 rounded-md border-2 border-[#f07868]/40 bg-[#f07868]/15 px-4 text-sm font-bold uppercase tracking-wide text-[#ff9a89] shadow-[3px_3px_0_0_rgba(240,120,104,0.35)] transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:bg-[#f07868]/25 active:translate-x-0 active:translate-y-0 active:shadow-none">Generate</button>
                 </div>
                 <p className="mt-2 text-xs text-slate-600">Unique and permanent once anchored.</p>
               </div>
@@ -199,14 +199,14 @@ function generateDocId() {
             )}
           </div>
         )}
-        {!error && !result && <div className="rounded-2xl border border-slate-800 bg-slate-900/30 p-6"><p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Issuance protocol</p><ol className="mt-5 space-y-5">{['Registry marker and QR are added', 'Stamped bytes are hashed with SHA-256', 'Hash is anchored by the department signer', 'Exact stamped PDF is stored for download'].map((text, index) => <li key={text} className="flex gap-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded border-2 border-sky-500/40 bg-sky-500/10 font-mono text-xs font-black text-sky-300 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.15)]">{index + 1}</span><span className="pt-1 text-sm leading-5 text-slate-400">{text}</span></li>)}</ol></div>}
+        {!error && !result && <div className="rounded-2xl border border-slate-800 bg-slate-900/30 p-6"><p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Issuance protocol</p><ol className="mt-5 space-y-5">{['Registry marker and QR are added', 'Stamped bytes are hashed with SHA-256', 'Hash is anchored by the department signer', 'Exact stamped PDF is stored for download'].map((text, index) => <li key={text} className="flex gap-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded border-2 border-[#f07868]/40 bg-[#f07868]/15 font-mono text-xs font-black text-[#ff9a89] shadow-[inset_0_1px_0_0_rgba(255,255,255,0.15)]">{index + 1}</span><span className="pt-1 text-sm leading-5 text-slate-400">{text}</span></li>)}</ol></div>}
         </div>
       </div>
     </div>
   )
 }
 
-const StepLabel = ({ number, title }: { number: string; title: string }) => <div className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded border-2 border-sky-500/40 bg-sky-500/10 font-mono text-[10px] font-black text-sky-300">{number}</span><span className="text-xs font-bold uppercase tracking-widest text-slate-400">{title}</span></div>
+const StepLabel = ({ number, title }: { number: string; title: string }) => <div className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded border-2 border-[#f07868]/40 bg-[#f07868]/15 font-mono text-[10px] font-black text-[#ff9a89]">{number}</span><span className="text-xs font-bold uppercase tracking-widest text-slate-400">{title}</span></div>
 
 function Input({
   value,

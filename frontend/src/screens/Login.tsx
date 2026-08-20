@@ -182,7 +182,7 @@ function LoginForm({
 // Tailwind shadows, so the entry screen reads as one piece with the floor
 // a signed-in user lands on next, not a separate "normal web app" login.
 const ROLE_TONES: Record<string, { badge: string; shadow: string; text: string }> = {
-  sky: { badge: 'border-sky-500/40 bg-sky-500/15 text-sky-300', shadow: 'shadow-[4px_4px_0_0_rgba(14,165,233,0.4)]', text: 'text-sky-400' },
+  sky: { badge: 'border-[#f07868]/40 bg-[#f07868]/15 text-[#ff9a89]', shadow: 'shadow-[4px_4px_0_0_rgba(240,120,104,0.4)]', text: 'text-sky-400' },
   emerald: { badge: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300', shadow: 'shadow-[4px_4px_0_0_rgba(16,185,129,0.4)]', text: 'text-emerald-400' },
   amber: { badge: 'border-amber-500/40 bg-amber-500/15 text-amber-300', shadow: 'shadow-[4px_4px_0_0_rgba(245,158,11,0.4)]', text: 'text-amber-400' },
   rose: { badge: 'border-rose-500/40 bg-rose-500/15 text-rose-300', shadow: 'shadow-[4px_4px_0_0_rgba(244,63,94,0.4)]', text: 'text-rose-400' },

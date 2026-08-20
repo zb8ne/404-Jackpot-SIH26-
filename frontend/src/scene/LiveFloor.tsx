@@ -68,7 +68,7 @@ const ACTIONS: Record<ApplicationUser['role'], { left: FloorAction[]; right: Flo
 // Tailwind's soft shadow-xl read as a game HUD next to the pixel office art;
 // blurred shadows look like ordinary web chrome sitting on top of it.
 const TONES: Record<string, { badge: string; shadow: string; selected: string }> = {
-  sky: { badge: 'border-sky-500/40 bg-sky-500/15 text-sky-300', shadow: 'shadow-[3px_3px_0_0_rgba(14,165,233,0.45)]', selected: 'bg-sky-500/10' },
+  sky: { badge: 'border-[#f07868]/40 bg-[#f07868]/15 text-[#ff9a89]', shadow: 'shadow-[3px_3px_0_0_rgba(240,120,104,0.45)]', selected: 'bg-[#f07868]/10' },
   emerald: { badge: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300', shadow: 'shadow-[3px_3px_0_0_rgba(16,185,129,0.45)]', selected: 'bg-emerald-500/10' },
   violet: { badge: 'border-violet-500/40 bg-violet-500/15 text-violet-300', shadow: 'shadow-[3px_3px_0_0_rgba(139,92,246,0.45)]', selected: 'bg-violet-500/10' },
   amber: { badge: 'border-amber-500/40 bg-amber-500/15 text-amber-300', shadow: 'shadow-[3px_3px_0_0_rgba(245,158,11,0.45)]', selected: 'bg-amber-500/10' },
@@ -183,7 +183,7 @@ export function LiveFloor({ profile }: { profile: ApplicationUser }) {
         <span className="flex items-center gap-2 text-sm font-semibold text-slate-300">
           Live floor
           {activity > 0 && (
-            <span className="rounded-full bg-sky-500/20 px-2 py-0.5 text-xs text-sky-300">{activity}</span>
+            <span className="rounded-full bg-[#f07868]/20 px-2 py-0.5 text-xs text-[#ff9a89]">{activity}</span>
           )}
         </span>
         <span className="text-xs text-slate-500">{open ? 'hide' : 'show'}</span>
