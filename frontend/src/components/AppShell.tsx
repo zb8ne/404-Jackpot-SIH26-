@@ -68,7 +68,7 @@ export function AppShell({
   return (
     <div className="min-h-screen bg-slate-950">
       <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur">
-        <div className="mx-auto max-w-7xl px-6 py-5">
+        <div className="mx-auto max-w-[1600px] px-6 py-5">
           <div className="flex flex-wrap items-start justify-between gap-5">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-400">Secure credential registry</p>
@@ -112,7 +112,7 @@ export function AppShell({
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-6 py-10">{children}</main>
+      <main className="mx-auto max-w-[1600px] px-4 py-8 sm:px-6">{children}</main>
     </div>
   )
 }

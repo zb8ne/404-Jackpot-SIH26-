@@ -135,7 +135,7 @@ export default function App() {
     <AppShell account={account} contract={contract} activeTab={tab} onTabChange={setTab} onSignOut={logout}>
       {profile && (
         <Suspense fallback={null}>
-          <LiveFloor />
+          <LiveFloor profile={profile} />
         </Suspense>
       )}
 

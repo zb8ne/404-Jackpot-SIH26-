@@ -257,7 +257,7 @@ export function RegistryFloor({ onReady, onCaption }: RegistryFloorProps = {}) {
   }, [glGeneration]);
 
   return (
-    <div className="relative h-[600px] w-full overflow-hidden rounded-2xl border border-slate-800 bg-slate-950">
+    <div className="relative h-[clamp(440px,72vh,820px)] min-h-0 w-full overflow-hidden rounded-2xl border border-slate-800 bg-slate-950">
       <div ref={hostRef} className="h-full w-full" />
       {error && (
         <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-red-300">
