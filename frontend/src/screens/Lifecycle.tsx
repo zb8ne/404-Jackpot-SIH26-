@@ -33,7 +33,7 @@ export function Revoke() {
     setError('')
     setResult(null)
     try {
-      setResult(await revokeDocument(docHash.trim(), department, credentials.find((item) => item.docHash === docHash)?.docId))
+      setResult(await revokeDocument(docHash.trim(), department))
     } catch (e) {
       setError(errorMessage(e))
     } finally {
