@@ -1,10 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getMonitoringOverview, type MonitoringOverview, type OperationCounts } from '../api'
 
-export function Monitoring() {
+/** Which section to scroll to on open — the Live Floor's Controller rail links
+ *  here (System activity / Integrity / Department health) even though it's
+ *  all one dashboard, so a section id tells us where to land. */
+export type MonitoringFocus = 'activity' | 'integrity' | 'health'
+
+export function Monitoring({ focus }: { focus?: MonitoringFocus } = {}) {
   const [data, setData] = useState<MonitoringOverview | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const activityRef = useRef<HTMLElement>(null)
+  const integrityRef = useRef<HTMLDivElement>(null)
+  const healthRef = useRef<HTMLElement>(null)
 
   function load() {
     setBusy(true)
@@ -16,6 +24,12 @@ export function Monitoring() {
   }
 
   useEffect(load, [])
+
+  useEffect(() => {
+    if (!data || !focus) return
+    const target = focus === 'activity' ? activityRef.current : focus === 'integrity' ? integrityRef.current : healthRef.current
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [data, focus])
 
   return (
     <div className="space-y-8">
@@ -41,7 +55,7 @@ export function Monitoring() {
                 ))}
               </div>
             </div>
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-6">
+            <div ref={integrityRef} className="rounded-2xl border border-slate-800 bg-slate-900/50 p-6">
               <h2 className="text-xl font-bold text-slate-100">Audit integrity</h2>
               <p className={`mt-4 text-3xl font-black ${data.auditIntegrity.valid ? 'text-emerald-400' : 'text-red-400'}`}>
                 {data.auditIntegrity.valid ? 'VALID' : 'INVALID'}
@@ -53,7 +67,7 @@ export function Monitoring() {
             </div>
           </section>
 
-          <section>
+          <section ref={healthRef}>
             <h2 className="mb-4 text-xl font-bold text-slate-100">Departments</h2>
             <div className="overflow-x-auto rounded-2xl border border-slate-800">
               <table className="w-full text-left text-sm">
@@ -78,7 +92,7 @@ export function Monitoring() {
             </div>
           </section>
 
-          <section>
+          <section ref={activityRef}>
             <h2 className="mb-4 text-xl font-bold text-slate-100">Recent activity</h2>
             <div className="space-y-3">
               {data.recentActivity.map((event) => (

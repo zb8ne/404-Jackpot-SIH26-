@@ -12,7 +12,7 @@ import { Citizen } from '../screens/Citizen'
 import { GovernmentRequests } from '../screens/GovernmentRequests'
 import { Issue } from '../screens/Issue'
 import { Revoke, Supersede } from '../screens/Lifecycle'
-import { Monitoring } from '../screens/Monitoring'
+import { Monitoring, type MonitoringFocus } from '../screens/Monitoring'
 import { Verify } from '../screens/Verify'
 import { onSceneEvent } from './apiBus'
 import { startAuditPoll } from './auditPoll'
@@ -105,7 +105,7 @@ function ConnectedPanel({ action, onClose, onComplete }: { action: FloorAction; 
           : action.id === 'revoke' ? <Revoke />
             : action.id === 'requests' ? <GovernmentRequests />
               : action.id === 'audit' ? <AuditEvents />
-                : <Monitoring />
+                : <Monitoring focus={action.id as MonitoringFocus} />
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-700 bg-slate-900/70 shadow-2xl shadow-black/30">
       <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
