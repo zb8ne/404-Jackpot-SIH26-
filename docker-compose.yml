@@ -71,8 +71,10 @@ services:
         cp deployment.txt /deployment/deployment.txt
         echo "registry deployed at $$(cat /deployment/deployment.txt)"
 
-  # One-shot: department admins and demo citizens. Writes straight to SQLite,
-  # creating the schema if the API has not booted yet.
+  # One-shot: any configured government profiles plus the demo citizens. Each
+  # profile is optional so a contributor can run the stack with only the
+  # Supabase accounts they actually have. Writes straight to SQLite, creating
+  # the schema if the API has not booted yet.
   profiles:
     build:
       context: ./backend
@@ -84,21 +86,57 @@ services:
     volumes:
       - data:/data
     environment:
-      SEED_BIRTH_USER_ID: ${SEED_BIRTH_USER_ID:?set SEED_BIRTH_USER_ID (Supabase user id for the Birth admin)}
-      SEED_TRANSPORT_USER_ID: ${SEED_TRANSPORT_USER_ID:?set SEED_TRANSPORT_USER_ID}
-      SEED_EDUCATION_USER_ID: ${SEED_EDUCATION_USER_ID:?set SEED_EDUCATION_USER_ID}
+      SEED_BIRTH_USER_ID: ${SEED_BIRTH_USER_ID:-}
+      SEED_TRANSPORT_USER_ID: ${SEED_TRANSPORT_USER_ID:-}
+      SEED_EDUCATION_USER_ID: ${SEED_EDUCATION_USER_ID:-}
+      SEED_BIRTH_OFFICIAL_USER_ID: ${SEED_BIRTH_OFFICIAL_USER_ID:-}
+      SEED_CONTROLLER_USER_ID: ${SEED_CONTROLLER_USER_ID:-}
+      SEED_ASHA_USER_ID: ${SEED_ASHA_USER_ID:-}
+      SEED_RAHUL_USER_ID: ${SEED_RAHUL_USER_ID:-}
       SEED_BIRTH_EMAIL: ${SEED_BIRTH_EMAIL:-birth.admin@example.test}
       SEED_TRANSPORT_EMAIL: ${SEED_TRANSPORT_EMAIL:-transport.admin@example.test}
       SEED_EDUCATION_EMAIL: ${SEED_EDUCATION_EMAIL:-education.admin@example.test}
+      SEED_BIRTH_OFFICIAL_EMAIL: ${SEED_BIRTH_OFFICIAL_EMAIL:-birth.official@example.test}
+      SEED_CONTROLLER_EMAIL: ${SEED_CONTROLLER_EMAIL:-controller@example.test}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         set -e
-        profile-seed -db /data/credentials.db -id "$$SEED_BIRTH_USER_ID"     -email "$$SEED_BIRTH_EMAIL"     -name "Birth Demo Admin"     -role ADMIN -department birth
-        profile-seed -db /data/credentials.db -id "$$SEED_TRANSPORT_USER_ID" -email "$$SEED_TRANSPORT_EMAIL" -name "Transport Demo Admin" -role ADMIN -department transport
-        profile-seed -db /data/credentials.db -id "$$SEED_EDUCATION_USER_ID" -email "$$SEED_EDUCATION_EMAIL" -name "Education Demo Admin" -role ADMIN -department education
-        citizen-seed -db /data/credentials.db -id asha-menon -name "Asha Menon" -email asha.menon@example.test
-        citizen-seed -db /data/credentials.db -id rahul-iyer -name "Rahul Iyer" -email rahul.iyer@example.test
+        if [ -n "$$SEED_BIRTH_USER_ID" ]; then
+          profile-seed -db /data/credentials.db -id "$$SEED_BIRTH_USER_ID" -email "$$SEED_BIRTH_EMAIL" -name "Birth Demo Admin" -role ADMIN -department birth
+        else
+          echo "skipping Birth Admin profile: SEED_BIRTH_USER_ID is unset"
+        fi
+        if [ -n "$$SEED_TRANSPORT_USER_ID" ]; then
+          profile-seed -db /data/credentials.db -id "$$SEED_TRANSPORT_USER_ID" -email "$$SEED_TRANSPORT_EMAIL" -name "Transport Demo Admin" -role ADMIN -department transport
+        else
+          echo "skipping Transport Admin profile: SEED_TRANSPORT_USER_ID is unset"
+        fi
+        if [ -n "$$SEED_EDUCATION_USER_ID" ]; then
+          profile-seed -db /data/credentials.db -id "$$SEED_EDUCATION_USER_ID" -email "$$SEED_EDUCATION_EMAIL" -name "Education Demo Admin" -role ADMIN -department education
+        else
+          echo "skipping Education Admin profile: SEED_EDUCATION_USER_ID is unset"
+        fi
+        if [ -n "$$SEED_BIRTH_OFFICIAL_USER_ID" ]; then
+          profile-seed -db /data/credentials.db -id "$$SEED_BIRTH_OFFICIAL_USER_ID" -email "$$SEED_BIRTH_OFFICIAL_EMAIL" -name "Birth Demo Official" -role OFFICIAL -department birth
+        else
+          echo "skipping Birth Official profile: SEED_BIRTH_OFFICIAL_USER_ID is unset"
+        fi
+        if [ -n "$$SEED_CONTROLLER_USER_ID" ]; then
+          profile-seed -db /data/credentials.db -id "$$SEED_CONTROLLER_USER_ID" -email "$$SEED_CONTROLLER_EMAIL" -name "Demo Controller" -role CONTROLLER
+        else
+          echo "skipping Controller profile: SEED_CONTROLLER_USER_ID is unset"
+        fi
+        if [ -n "$$SEED_ASHA_USER_ID" ]; then
+          citizen-seed -db /data/credentials.db -id asha-menon -name "Asha Menon" -email asha.menon@example.test -supabase-user-id "$$SEED_ASHA_USER_ID"
+        else
+          citizen-seed -db /data/credentials.db -id asha-menon -name "Asha Menon" -email asha.menon@example.test
+        fi
+        if [ -n "$$SEED_RAHUL_USER_ID" ]; then
+          citizen-seed -db /data/credentials.db -id rahul-iyer -name "Rahul Iyer" -email rahul.iyer@example.test -supabase-user-id "$$SEED_RAHUL_USER_ID"
+        else
+          citizen-seed -db /data/credentials.db -id rahul-iyer -name "Rahul Iyer" -email rahul.iyer@example.test
+        fi
 
   backend:
     build:
@@ -116,10 +154,12 @@ services:
       RPC_URL: http://anvil:8545
       SUPABASE_URL: ${SUPABASE_URL:?set SUPABASE_URL (the Supabase project URL)}
       PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://127.0.0.1:5173}
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://127.0.0.1:${API_PORT:-8088}}
     restart: unless-stopped
 
-  # One-shot: the demo documents. Goes through the real REST API, so it needs
-  # live department tokens exactly as a human official would.
+  # One-shot: seed demo documents when all three Admin tokens are available.
+  # It exits successfully without seeding otherwise, allowing the application
+  # stack to run with a partial set of Supabase demo accounts.
   seed:
     build:
       context: ./backend
@@ -132,12 +172,17 @@ services:
     volumes:
       - ./demo-files:/demo-files
     environment:
-      SEED_BIRTH_TOKEN: ${SEED_BIRTH_TOKEN:?set SEED_BIRTH_TOKEN (a Supabase access token for the Birth admin)}
-      SEED_TRANSPORT_TOKEN: ${SEED_TRANSPORT_TOKEN:?set SEED_TRANSPORT_TOKEN}
-      SEED_EDUCATION_TOKEN: ${SEED_EDUCATION_TOKEN:?set SEED_EDUCATION_TOKEN}
+      SEED_BIRTH_TOKEN: ${SEED_BIRTH_TOKEN:-}
+      SEED_TRANSPORT_TOKEN: ${SEED_TRANSPORT_TOKEN:-}
+      SEED_EDUCATION_TOKEN: ${SEED_EDUCATION_TOKEN:-}
     # The seeder polls /health itself, so it tolerates the API still starting.
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - seed -api http://backend:8088 -out /demo-files
+      - |
+        if [ -n "$$SEED_BIRTH_TOKEN" ] && [ -n "$$SEED_TRANSPORT_TOKEN" ] && [ -n "$$SEED_EDUCATION_TOKEN" ]; then
+          exec seed -api http://backend:8088 -out /demo-files
+        fi
+        echo "skipping demo document seed: all three SEED_*_TOKEN values are required"
 
   frontend:
     build:

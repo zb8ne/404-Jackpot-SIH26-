@@ -15,7 +15,7 @@ func main() {
 	name := flag.String("name", "", "citizen display name")
 	email := flag.String("email", "", "citizen email (required)")
 	phone := flag.String("phone", "", "optional citizen phone")
-	supabaseID := flag.String("supabase-user-id", "", "optional future Supabase identity")
+	supabaseID := flag.String("supabase-user-id", "", "optional Supabase Auth user ID")
 	active := flag.Bool("active", true, "whether the citizen account is active")
 	linkDocID := flag.String("link-doc-id", "", "optional existing document ID to link to this citizen")
 	flag.Parse()

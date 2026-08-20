@@ -7,11 +7,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+
+	qrcode "github.com/skip2/go-qrcode"
 
 	"credreg/backend/internal/auth"
 	"credreg/backend/internal/chain"
@@ -43,27 +46,32 @@ type Server struct {
 	store           *store.Store
 	contractAddress string
 	publicWebURL    string
+	publicAPIURL    string
 	notifications   notifier
 }
 
-func New(c *chain.Client, s *store.Store, verifier auth.TokenVerifier, publicWebURL string) http.Handler {
-	return newHandlerConfigured(c, s, verifier, c.Address.Hex(), publicWebURL, newDevelopmentNotifier())
+func New(c *chain.Client, s *store.Store, verifier auth.TokenVerifier, publicWebURL, publicAPIURL string) http.Handler {
+	return newHandlerConfigured(c, s, verifier, c.Address.Hex(), publicWebURL, publicAPIURL, newDevelopmentNotifier())
 }
 
 func newHandler(c registry, s *store.Store, verifier auth.TokenVerifier, contractAddress string) http.Handler {
-	return newHandlerConfigured(c, s, verifier, contractAddress, "http://127.0.0.1:5173", newDevelopmentNotifier())
+	return newHandlerConfigured(c, s, verifier, contractAddress, "http://127.0.0.1:5173", "http://127.0.0.1:8088", newDevelopmentNotifier())
 }
 
-func newHandlerConfigured(c registry, s *store.Store, verifier auth.TokenVerifier, contractAddress, publicWebURL string, notifications notifier) http.Handler {
+func newHandlerConfigured(c registry, s *store.Store, verifier auth.TokenVerifier, contractAddress, publicWebURL, publicAPIURL string, notifications notifier) http.Handler {
 
-	srv := &Server{chain: c, reader: c, store: s, contractAddress: contractAddress, publicWebURL: strings.TrimRight(publicWebURL, "/"), notifications: notifications}
+	srv := &Server{chain: c, reader: c, store: s, contractAddress: contractAddress, publicWebURL: strings.TrimRight(publicWebURL, "/"), publicAPIURL: strings.TrimRight(publicAPIURL, "/"), notifications: notifications}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", srv.health)
 	mux.HandleFunc("GET /departments", srv.departments)
+	mux.HandleFunc("GET /qr/{docId}/download.png", srv.qrPNG)
 
 	authenticated := func(next http.Handler) http.Handler {
 		return auth.Middleware(verifier)(rbac.LoadProfile(s)(next))
+	}
+	identityAuthenticated := func(next http.Handler) http.Handler {
+		return auth.Middleware(verifier)(next)
 	}
 	protected := func(permission rbac.Permission, handler http.HandlerFunc) http.Handler {
 		return authenticated(rbac.Require(permission)(handler))
@@ -76,6 +84,11 @@ func newHandlerConfigured(c registry, s *store.Store, verifier auth.TokenVerifie
 	}
 
 	mux.Handle("GET /me", authenticated(http.HandlerFunc(srv.me)))
+	mux.Handle("GET /account", identityAuthenticated(http.HandlerFunc(srv.account)))
+	mux.Handle("GET /citizen/credentials", identityAuthenticated(http.HandlerFunc(srv.citizenCredentials)))
+	mux.Handle("GET /citizen/documents/{hash}/download", identityAuthenticated(http.HandlerFunc(srv.citizenDownload)))
+	mux.Handle("GET /citizen/verification-requests", identityAuthenticated(http.HandlerFunc(srv.citizenVerificationRequests)))
+	mux.Handle("POST /citizen/verification-requests/{id}/decision", identityAuthenticated(http.HandlerFunc(srv.decideCitizenVerificationRequest)))
 	mux.Handle("GET /citizens", protected(rbac.PermissionViewDept, srv.citizens))
 	mux.Handle("POST /issue", audited(rbac.PermissionIssue, actionIssue, srv.issue))
 	mux.Handle("POST /verify", audited(rbac.PermissionVerify, actionVerifyFile, srv.verify))
@@ -83,6 +96,7 @@ func newHandlerConfigured(c registry, s *store.Store, verifier auth.TokenVerifie
 	mux.Handle("POST /revoke", audited(rbac.PermissionRevoke, actionRevoke, srv.revoke))
 	mux.Handle("POST /supersede", audited(rbac.PermissionSupersede, actionSupersede, srv.supersede))
 	mux.Handle("GET /credentials/{citizen}", protected(rbac.PermissionViewDept, srv.credentials))
+	mux.Handle("GET /department/credentials", protected(rbac.PermissionViewDept, srv.departmentCredentials))
 	mux.Handle("GET /documents/{hash}/download", protected(rbac.PermissionViewDept, srv.download))
 	mux.Handle("GET /audit-events", authenticated(http.HandlerFunc(srv.auditEventsAccess)))
 	mux.Handle("GET /monitoring/overview", protected(rbac.PermissionMonitorAll, srv.monitoringOverview))
@@ -191,6 +205,76 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (s *Server) account(w http.ResponseWriter, r *http.Request) {
+	user, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "authenticated user missing from context")
+		return
+	}
+
+	government, governmentErr := s.store.UserProfileByID(user.ID)
+	citizen, citizenErr := s.store.CitizenAccountBySupabaseUserID(user.ID)
+	governmentFound := governmentErr == nil
+	citizenFound := citizenErr == nil
+	if governmentErr != nil && !errors.Is(governmentErr, store.ErrNotFound) {
+		writeErr(w, http.StatusInternalServerError, "could not load application account")
+		return
+	}
+	if citizenErr != nil && !errors.Is(citizenErr, store.ErrNotFound) {
+		writeErr(w, http.StatusInternalServerError, "could not load application account")
+		return
+	}
+	if governmentFound && citizenFound {
+		writeErr(w, http.StatusConflict, "identity is linked to both government and citizen accounts")
+		return
+	}
+	if !governmentFound && !citizenFound {
+		writeErr(w, http.StatusForbidden, "no application account is linked to this identity")
+		return
+	}
+
+	if governmentFound {
+		if !government.Active || (government.Department != nil && !government.Department.Active) {
+			writeErr(w, http.StatusForbidden, "application account is inactive")
+			return
+		}
+		var department any
+		if d := government.Department; d != nil {
+			department = map[string]any{
+				"id": d.ID, "name": d.DisplayName, "docType": d.DocType,
+				"docTypeName": chain.DocTypeName(d.DocType),
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"accountType": "GOVERNMENT",
+			"id":          government.SupabaseUserID,
+			"email":       government.Email,
+			"governmentProfile": map[string]any{
+				"id": government.SupabaseUserID, "email": government.Email,
+				"name": government.DisplayName, "role": government.Role,
+				"active": government.Active, "department": department,
+			},
+			"citizenProfile": nil,
+		})
+		return
+	}
+
+	if !citizen.Active {
+		writeErr(w, http.StatusForbidden, "application account is inactive")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"accountType":       "CITIZEN",
+		"id":                citizen.ID,
+		"email":             citizen.Email,
+		"governmentProfile": nil,
+		"citizenProfile": map[string]any{
+			"id": citizen.ID, "email": citizen.Email,
+			"displayName": citizen.DisplayName, "active": citizen.Active,
+		},
+	})
+}
+
 func (s *Server) citizens(w http.ResponseWriter, r *http.Request) {
 	_, docTypeName, ok := requestDepartment(w, r)
 	if !ok {
@@ -271,7 +355,7 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 	// Stamp first, then hash. The citizen walks away with the stamped file, so
 	// the stamped bytes are the ones the chain has to know about — hashing the
 	// upload as it arrived would anchor a document nobody holds.
-	stamped, marked := pdfdoc.StampWithQR(pdf, docID, s.verificationURL(docID))
+	stamped, marked := pdfdoc.StampWithQRDownload(pdf, docID, s.verificationURL(docID), s.qrDownloadURL(docID))
 	sum := sha256.Sum256(stamped)
 	docHash := "0x" + hex.EncodeToString(sum[:])
 	audit.DocHash = docHash
@@ -312,6 +396,40 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) verificationURL(docID string) string {
 	return s.publicWebURL + "/verify?docId=" + url.QueryEscape(docID)
+}
+
+func (s *Server) qrDownloadURL(docID string) string {
+	return s.publicAPIURL + "/qr/" + url.PathEscape(docID) + "/download.png"
+}
+
+func (s *Server) qrPNG(w http.ResponseWriter, r *http.Request) {
+	docID := strings.TrimSpace(r.PathValue("docId"))
+	document, found, err := s.store.ByDocumentID(docID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load credential")
+		return
+	}
+	if !found {
+		writeErr(w, http.StatusNotFound, "credential not found")
+		return
+	}
+	png, err := qrcode.Encode(s.verificationURL(document.DocID), qrcode.Medium, 512)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not generate QR code")
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, safeDownloadFilename(document.DocID)+"-qr.png"))
+	w.Write(png)
+}
+
+func safeDownloadFilename(value string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, value)
 }
 
 // zeroHash is what an unknown docId resolves to, and what we report as the
@@ -649,7 +767,7 @@ func (s *Server) supersede(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stamped, marked := pdfdoc.StampWithQR(pdf, docID, s.verificationURL(docID))
+	stamped, marked := pdfdoc.StampWithQRDownload(pdf, docID, s.verificationURL(docID), s.qrDownloadURL(docID))
 	sum := sha256.Sum256(stamped)
 	newHash := "0x" + hex.EncodeToString(sum[:])
 	audit.DocHash = newHash
@@ -715,6 +833,124 @@ func (s *Server) credentials(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"citizen": citizen, "documents": out})
+}
+
+func (s *Server) departmentCredentials(w http.ResponseWriter, r *http.Request) {
+	_, docTypeName, ok := requestDepartment(w, r)
+	if !ok {
+		return
+	}
+	docs, err := s.store.ByDocType(docTypeName)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load department credentials")
+		return
+	}
+	type entry struct {
+		store.Document
+		Status string `json:"status"`
+	}
+	out := []entry{}
+	for _, doc := range docs {
+		item := entry{Document: doc, Status: "UNKNOWN"}
+		if hash, err := parseHash(doc.DocHash); err == nil {
+			if record, err := s.reader.Verify(r.Context(), hash); err == nil && record.Found {
+				item.Status = statusName(record.Status)
+			}
+		}
+		out = append(out, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"documents": out})
+}
+
+func (s *Server) citizenCredentials(w http.ResponseWriter, r *http.Request) {
+	account, ok := s.authenticatedCitizen(w, r)
+	if !ok {
+		return
+	}
+	docs, err := s.store.ByCitizenAccountID(account.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load credentials")
+		return
+	}
+	type entry struct {
+		store.Document
+		Status string `json:"status"`
+	}
+	out := []entry{}
+	for _, doc := range docs {
+		item := entry{Document: doc, Status: "UNKNOWN"}
+		if hash, err := parseHash(doc.DocHash); err == nil {
+			if record, err := s.reader.Verify(r.Context(), hash); err == nil && record.Found {
+				item.Status = statusName(record.Status)
+			}
+		}
+		out = append(out, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"citizen": account.DisplayName, "documents": out})
+}
+
+func (s *Server) citizenDownload(w http.ResponseWriter, r *http.Request) {
+	account, ok := s.authenticatedCitizen(w, r)
+	if !ok {
+		return
+	}
+	hash := r.PathValue("hash")
+	document, found, err := s.store.ByHash(hash)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load document")
+		return
+	}
+	if !found {
+		writeErr(w, http.StatusNotFound, "no such document")
+		return
+	}
+	if document.CitizenAccountID == nil || *document.CitizenAccountID != account.ID {
+		writeErr(w, http.StatusForbidden, "document does not belong to this citizen account")
+		return
+	}
+	pdf, found, err := s.store.PDF(hash)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load document")
+		return
+	}
+	if !found {
+		writeErr(w, http.StatusNotFound, "no such document")
+		return
+	}
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, document.Filename))
+	w.Write(pdf)
+}
+
+func (s *Server) authenticatedCitizen(w http.ResponseWriter, r *http.Request) (store.CitizenAccount, bool) {
+	user, ok := auth.UserFromContext(r.Context())
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "authenticated user missing from context")
+		return store.CitizenAccount{}, false
+	}
+	_, governmentErr := s.store.UserProfileByID(user.ID)
+	if governmentErr != nil && !errors.Is(governmentErr, store.ErrNotFound) {
+		writeErr(w, http.StatusInternalServerError, "could not load application account")
+		return store.CitizenAccount{}, false
+	}
+	account, err := s.store.CitizenAccountBySupabaseUserID(user.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeErr(w, http.StatusForbidden, "no citizen account is linked to this identity")
+		return store.CitizenAccount{}, false
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load citizen account")
+		return store.CitizenAccount{}, false
+	}
+	if governmentErr == nil {
+		writeErr(w, http.StatusConflict, "identity is linked to both government and citizen accounts")
+		return store.CitizenAccount{}, false
+	}
+	if !account.Active {
+		writeErr(w, http.StatusForbidden, "citizen account is inactive")
+		return store.CitizenAccount{}, false
+	}
+	return account, true
 }
 
 func (s *Server) download(w http.ResponseWriter, r *http.Request) {

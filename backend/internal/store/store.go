@@ -195,6 +195,14 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate documents: %w", err)
 	}
+	if err := ensureColumn(db, "citizen_accounts", "supabase_user_id", "TEXT"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate citizen identity: %w", err)
+	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_citizen_accounts_supabase_user ON citizen_accounts(supabase_user_id) WHERE supabase_user_id IS NOT NULL`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("index citizen identity: %w", err)
+	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_documents_citizen_account ON documents(citizen_account_id)`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("index citizen linkage: %w", err)
@@ -292,6 +300,40 @@ func (s *Store) ByCitizen(citizen string) ([]Document, error) {
 
 func (s *Store) ByCitizenAndDocType(citizen, docType string) ([]Document, error) {
 	return s.byCitizen(citizen, docType, true)
+}
+
+func (s *Store) ByCitizenAccountID(citizenAccountID string) ([]Document, error) {
+	rows, err := s.db.Query(`SELECT `+selectCols+` FROM documents WHERE citizen_account_id = ? ORDER BY issued_at DESC, rowid DESC`, citizenAccountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	docs := []Document{}
+	for rows.Next() {
+		doc, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		docs = append(docs, doc)
+	}
+	return docs, rows.Err()
+}
+
+func (s *Store) ByDocType(docType string) ([]Document, error) {
+	rows, err := s.db.Query(`SELECT `+selectCols+` FROM documents WHERE doc_type = ? ORDER BY issued_at DESC, rowid DESC`, docType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	docs := []Document{}
+	for rows.Next() {
+		doc, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		docs = append(docs, doc)
+	}
+	return docs, rows.Err()
 }
 
 func (s *Store) byCitizen(citizen, docType string, scoped bool) ([]Document, error) {

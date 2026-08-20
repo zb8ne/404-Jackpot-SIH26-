@@ -37,7 +37,7 @@ func (s *Store) UpsertCitizenAccount(account CitizenAccount) error {
 	_, err = s.db.Exec(`
 		INSERT INTO citizen_accounts (id, supabase_user_id, display_name, email, phone, active)
 		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET supabase_user_id=excluded.supabase_user_id,
+		ON CONFLICT(id) DO UPDATE SET supabase_user_id=COALESCE(excluded.supabase_user_id, citizen_accounts.supabase_user_id),
 		 display_name=excluded.display_name, email=excluded.email, phone=excluded.phone,
 		 active=excluded.active, updated_at=datetime('now')`,
 		account.ID, account.SupabaseUserID, account.DisplayName, account.Email, account.Phone, account.Active)
@@ -46,6 +46,13 @@ func (s *Store) UpsertCitizenAccount(account CitizenAccount) error {
 
 func (s *Store) CitizenAccountByID(id string) (CitizenAccount, error) {
 	return scanCitizen(s.db.QueryRow(`SELECT id, supabase_user_id, display_name, email, phone, active, created_at, updated_at FROM citizen_accounts WHERE id=?`, id))
+}
+
+// CitizenAccountBySupabaseUserID resolves an authenticated Supabase identity
+// to its backend-owned citizen account. Citizen-facing handlers must use this
+// lookup instead of trusting an account id supplied by the browser.
+func (s *Store) CitizenAccountBySupabaseUserID(supabaseUserID string) (CitizenAccount, error) {
+	return scanCitizen(s.db.QueryRow(`SELECT id, supabase_user_id, display_name, email, phone, active, created_at, updated_at FROM citizen_accounts WHERE supabase_user_id=?`, strings.TrimSpace(supabaseUserID)))
 }
 
 func (s *Store) CitizenAccounts() ([]CitizenAccount, error) {
@@ -114,6 +121,7 @@ type VerificationRequest struct {
 type VerificationRequestQuery struct {
 	Limit, Offset                        int
 	State, RequesterUserID, DepartmentID string
+	CitizenAccountID                     string
 }
 
 func (s *Store) CreateVerificationRequest(req VerificationRequest, event AuditEvent) error {
@@ -158,6 +166,10 @@ func (s *Store) VerificationRequests(q VerificationRequestQuery) ([]Verification
 		where = append(where, "vr.department_id=?")
 		args = append(args, q.DepartmentID)
 	}
+	if q.CitizenAccountID != "" {
+		where = append(where, "vr.citizen_account_id=?")
+		args = append(args, q.CitizenAccountID)
+	}
 	limit := q.Limit
 	if limit == 0 {
 		limit = 50
@@ -186,6 +198,17 @@ func (s *Store) RecordNotification(requestID, destination, status, errorMessage 
 			failure = errorMessage
 		}
 		_, err := conn.ExecContext(ctx, `INSERT INTO notification_attempts (verification_request_id, channel, destination_redacted, status, error_message, created_at) VALUES (?, 'EMAIL', ?, ?, ?, ?)`, requestID, destination, status, failure, time.Now().UTC().Format(time.RFC3339Nano))
+		if err != nil {
+			return err
+		}
+		_, err = appendAuditEvent(ctx, conn, event)
+		return err
+	})
+}
+
+func (s *Store) RecordInboxDelivery(requestID, citizenAccountID string, event AuditEvent) error {
+	return s.withImmediate(func(ctx context.Context, conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, `INSERT INTO notification_attempts (verification_request_id, channel, destination_redacted, status, created_at) VALUES (?, 'WEB_INBOX', ?, 'SUCCEEDED', ?)`, requestID, citizenAccountID, time.Now().UTC().Format(time.RFC3339Nano))
 		if err != nil {
 			return err
 		}
@@ -245,6 +268,61 @@ func (s *Store) DecideConsent(tokenHash, decision string, event AuditEvent) (Ver
 			return err
 		}
 		result, err = scanVerificationRequest(conn.QueryRowContext(ctx, verificationRequestSelect+` WHERE vr.id=?`, req.ID))
+		return err
+	})
+	if err == nil && decisionErr != nil {
+		return VerificationRequest{}, decisionErr
+	}
+	return result, err
+}
+
+func (s *Store) DecideCitizenRequest(id, citizenAccountID, decision string, event AuditEvent) (VerificationRequest, error) {
+	var result VerificationRequest
+	var decisionErr error
+	err := s.withImmediate(func(ctx context.Context, conn *sql.Conn) error {
+		req, err := scanVerificationRequest(conn.QueryRowContext(ctx, verificationRequestSelect+` WHERE vr.id=? AND vr.citizen_account_id=?`, id, citizenAccountID))
+		if err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		if req.State == decision {
+			result = req
+			return nil
+		}
+		if req.State == "EXPIRED" {
+			decisionErr = ErrExpired
+			return nil
+		}
+		if req.State != "PENDING" {
+			return ErrConflict
+		}
+		expires, err := time.Parse(time.RFC3339Nano, req.ExpiresAt)
+		if err != nil {
+			return err
+		}
+		if !now.Before(expires) {
+			if _, err := conn.ExecContext(ctx, `UPDATE verification_requests SET state='EXPIRED', version=version+1 WHERE id=? AND state='PENDING'`, req.ID); err != nil {
+				return err
+			}
+			event.Action, event.Result = "VERIFICATION_REQUEST_EXPIRED", "EXPIRED"
+			if _, err := appendAuditEvent(ctx, conn, event); err != nil {
+				return err
+			}
+			decisionErr = ErrExpired
+			return nil
+		}
+		decisionAt := now.Format(time.RFC3339Nano)
+		updated, err := conn.ExecContext(ctx, `UPDATE verification_requests SET state=?, decision_at=?, decision_channel='WEB_INBOX', decision_reference=?, version=version+1 WHERE id=? AND citizen_account_id=? AND state='PENDING'`, decision, decisionAt, citizenAccountID, id, citizenAccountID)
+		if err != nil {
+			return err
+		}
+		if count, _ := updated.RowsAffected(); count != 1 {
+			return ErrConflict
+		}
+		if _, err := appendAuditEvent(ctx, conn, event); err != nil {
+			return err
+		}
+		result, err = scanVerificationRequest(conn.QueryRowContext(ctx, verificationRequestSelect+` WHERE vr.id=?`, id))
 		return err
 	})
 	if err == nil && decisionErr != nil {

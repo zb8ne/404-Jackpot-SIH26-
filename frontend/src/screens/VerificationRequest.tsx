@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
-import { completeVerificationRequest, createVerificationRequest, getDevelopmentConsentURL, getVerificationRequest, type VerificationRequest, type VerifyResult } from '../api'
+import { completeVerificationRequest, createVerificationRequest, getVerificationRequest, type VerificationRequest, type VerifyResult } from '../api'
 import { VerdictPanel } from './Verify'
 
 export function VerificationRequestFlow({ documentId }: { documentId: string }) {
   const [purpose, setPurpose] = useState('')
   const [request, setRequest] = useState<VerificationRequest | null>(null)
   const [requestId, setRequestId] = useState('')
-  const [consentURL, setConsentURL] = useState('')
   const [verification, setVerification] = useState<VerifyResult | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -16,8 +15,7 @@ export function VerificationRequestFlow({ documentId }: { documentId: string }) 
     try {
       const created = await createVerificationRequest(documentId, purpose.trim())
       setRequestId(created.id)
-      const [status, demo] = await Promise.all([getVerificationRequest(created.id), getDevelopmentConsentURL(created.id)])
-      setRequest(status); setConsentURL(demo.consentUrl)
+      setRequest(await getVerificationRequest(created.id))
     } catch (e) { setError(message(e)) } finally { setBusy(false) }
   }
 
@@ -39,7 +37,7 @@ export function VerificationRequestFlow({ documentId }: { documentId: string }) 
     <div><p className="text-xs font-semibold uppercase tracking-widest text-sky-400">QR verification</p><h1 className="mt-2 text-3xl font-black text-slate-100">Request citizen consent</h1><p className="mt-2 text-slate-400">Document <span className="font-mono text-slate-200">{documentId}</span> requires one-time citizen approval before its registry result is shown.</p></div>
     {error && <div className="rounded-xl border border-red-500/50 bg-red-500/10 p-4 text-red-300">{error}</div>}
     {!request && <form onSubmit={create} className="rounded-2xl border border-slate-800 bg-slate-900/50 p-8"><label className="text-sm text-slate-400">Verification purpose<textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} required maxLength={500} className="mt-2 min-h-28 w-full rounded-lg border border-slate-700 bg-slate-950 p-4 text-slate-100" placeholder="Why is this credential being verified?" /></label><button disabled={busy || !purpose.trim()} className="mt-5 w-full rounded-xl bg-sky-600 px-6 py-4 font-bold text-white disabled:opacity-50">{busy ? 'Creating…' : 'Send consent request'}</button></form>}
-    {request && <section className="rounded-2xl border border-slate-800 bg-slate-900/50 p-8"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-bold text-slate-100">Request status</h2><span className="rounded-full bg-slate-800 px-3 py-1 font-bold text-sky-300">{request.state}</span></div><dl className="mt-5 grid gap-4 sm:grid-cols-2"><Row label="Request ID" value={request.id} mono /><Row label="Department" value={request.departmentName} /><Row label="Requester" value={request.requesterName || request.requesterEmail} /><Row label="Purpose" value={request.purpose} /><Row label="Expires" value={new Date(request.expiresAt).toLocaleString()} /><Row label="Notification" value={`${request.notificationStatus} · ${request.notificationDestination}`} /></dl>{consentURL && <div className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4"><div className="text-xs font-bold uppercase tracking-wider text-amber-300">Development email capture</div><a className="mt-2 block break-all text-sm text-amber-100 underline" href={consentURL}>{consentURL}</a></div>}<div className="mt-6 flex gap-3"><button disabled={busy} onClick={() => void refresh()} className="rounded-lg border border-slate-700 px-5 py-3 text-slate-200">Refresh</button>{request.state === 'APPROVED' && <button disabled={busy} onClick={() => void complete()} className="rounded-lg bg-emerald-600 px-5 py-3 font-bold text-white">Complete verification</button>}</div>{request.state === 'DENIED' && <p className="mt-5 text-red-300">The citizen denied this request. Verification cannot proceed.</p>}{request.state === 'EXPIRED' && <p className="mt-5 text-amber-300">This request expired. Create a new request if verification is still needed.</p>}</section>}
+    {request && <section className="rounded-2xl border border-slate-800 bg-slate-900/50 p-8"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-bold text-slate-100">Request status</h2><span className="rounded-full bg-slate-800 px-3 py-1 font-bold text-sky-300">{request.state}</span></div><dl className="mt-5 grid gap-4 sm:grid-cols-2"><Row label="Request ID" value={request.id} mono /><Row label="Department" value={request.departmentName} /><Row label="Requester" value={request.requesterName || request.requesterEmail} /><Row label="Purpose" value={request.purpose} /><Row label="Expires" value={new Date(request.expiresAt).toLocaleString()} /><Row label="Delivery" value="Citizen web inbox" /></dl><div className="mt-6 flex gap-3"><button disabled={busy} onClick={() => void refresh()} className="rounded-lg border border-slate-700 px-5 py-3 text-slate-200">Refresh</button>{request.state === 'APPROVED' && <button disabled={busy} onClick={() => void complete()} className="rounded-lg bg-emerald-600 px-5 py-3 font-bold text-white">Complete verification</button>}</div>{request.state === 'DENIED' && <p className="mt-5 text-red-300">The citizen denied this request. Verification cannot proceed.</p>}{request.state === 'EXPIRED' && <p className="mt-5 text-amber-300">This request expired. Create a new request if verification is still needed.</p>}</section>}
     {verification && <VerdictPanel result={verification} />}
   </div>
 }
