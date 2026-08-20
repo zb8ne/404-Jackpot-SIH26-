@@ -63,36 +63,44 @@ const ACTIONS: Record<ApplicationUser['role'], { left: FloorAction[]; right: Flo
   },
 }
 
-const TONES: Record<string, string> = {
-  sky: 'border-sky-500/35 bg-sky-500/10 text-sky-300 group-hover:border-sky-400/70',
-  emerald: 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300 group-hover:border-emerald-400/70',
-  violet: 'border-violet-500/35 bg-violet-500/10 text-violet-300 group-hover:border-violet-400/70',
-  amber: 'border-amber-500/35 bg-amber-500/10 text-amber-300 group-hover:border-amber-400/70',
-  rose: 'border-rose-500/35 bg-rose-500/10 text-rose-300 group-hover:border-rose-400/70',
-  cyan: 'border-cyan-500/35 bg-cyan-500/10 text-cyan-300 group-hover:border-cyan-400/70',
+// A "slot" tone: badge fill/text, a hard pixel-shadow color to match, and the
+// selected-state background wash. Hard offset shadows (no blur) instead of
+// Tailwind's soft shadow-xl read as a game HUD next to the pixel office art;
+// blurred shadows look like ordinary web chrome sitting on top of it.
+const TONES: Record<string, { badge: string; shadow: string; selected: string }> = {
+  sky: { badge: 'border-sky-500/40 bg-sky-500/15 text-sky-300', shadow: 'shadow-[3px_3px_0_0_rgba(14,165,233,0.45)]', selected: 'bg-sky-500/10' },
+  emerald: { badge: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300', shadow: 'shadow-[3px_3px_0_0_rgba(16,185,129,0.45)]', selected: 'bg-emerald-500/10' },
+  violet: { badge: 'border-violet-500/40 bg-violet-500/15 text-violet-300', shadow: 'shadow-[3px_3px_0_0_rgba(139,92,246,0.45)]', selected: 'bg-violet-500/10' },
+  amber: { badge: 'border-amber-500/40 bg-amber-500/15 text-amber-300', shadow: 'shadow-[3px_3px_0_0_rgba(245,158,11,0.45)]', selected: 'bg-amber-500/10' },
+  rose: { badge: 'border-rose-500/40 bg-rose-500/15 text-rose-300', shadow: 'shadow-[3px_3px_0_0_rgba(244,63,94,0.45)]', selected: 'bg-rose-500/10' },
+  cyan: { badge: 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300', shadow: 'shadow-[3px_3px_0_0_rgba(6,182,212,0.45)]', selected: 'bg-cyan-500/10' },
 }
 
 function ActionRail({ actions, side, active, onSelect, floating = false }: { actions: FloorAction[]; side: 'left' | 'right'; active: string; onSelect: (action: FloorAction) => void; floating?: boolean }) {
   return (
     <div className={floating ? 'flex flex-col gap-2' : 'grid grid-cols-2 gap-2 sm:grid-cols-3'} aria-label={`${side} floor controls`}>
-      {actions.map((action) => (
-        <button
-          key={action.label}
-          type="button"
-          onClick={() => onSelect(action)}
-          aria-pressed={active === action.id}
-          title={`${action.label} — open workspace`}
-          className={`group flex items-center rounded-2xl border bg-slate-950/90 p-3 shadow-xl shadow-black/20 backdrop-blur transition hover:-translate-y-0.5 hover:bg-slate-900 ${floating ? 'h-[5.5rem] w-28 flex-col justify-center gap-2 text-center xl:w-32' : 'min-h-20 gap-3 text-left'} ${active === action.id ? 'border-slate-400 ring-2 ring-sky-500/30' : 'border-slate-700/80'}`}
-        >
-          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border font-mono text-xl font-black transition ${TONES[action.tone]}`}>
-            {action.icon}
-          </span>
-          <span className={floating ? 'w-full' : ''}>
-            <span className={`block font-bold text-slate-200 ${floating ? 'whitespace-nowrap text-xs leading-none' : 'text-sm'}`}>{action.label}</span>
-            {!floating && <span className="block text-[11px] leading-tight text-slate-500">{action.hint}</span>}
-          </span>
-        </button>
-      ))}
+      {actions.map((action) => {
+        const tone = TONES[action.tone]
+        const isActive = active === action.id
+        return (
+          <button
+            key={action.label}
+            type="button"
+            onClick={() => onSelect(action)}
+            aria-pressed={isActive}
+            title={`${action.label} — open workspace`}
+            className={`group flex items-center rounded-lg border-2 bg-slate-950/90 p-3 backdrop-blur transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-0 active:translate-y-0 active:shadow-none ${tone.shadow} ${floating ? 'h-[5.5rem] w-28 flex-col justify-center gap-2 text-center xl:w-32' : 'min-h-20 gap-3 text-left'} ${isActive ? `border-slate-300 ${tone.selected}` : 'border-slate-700'}`}
+          >
+            <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border-2 font-mono text-xl font-black shadow-[inset_0_1px_0_0_rgba(255,255,255,0.2)] transition group-hover:brightness-125 ${tone.badge}`}>
+              {action.icon}
+            </span>
+            <span className={floating ? 'w-full' : ''}>
+              <span className={`block font-bold uppercase tracking-wider text-slate-200 ${floating ? 'whitespace-nowrap text-[11px] leading-none' : 'text-xs'}`}>{action.label}</span>
+              {!floating && <span className="block text-[11px] normal-case leading-tight text-slate-500">{action.hint}</span>}
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }
