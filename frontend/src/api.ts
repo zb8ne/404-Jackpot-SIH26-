@@ -47,6 +47,29 @@ export type ApplicationUser = {
   }
 }
 
+export type CitizenProfile = {
+  id: string
+  email: string
+  displayName: string
+  active: boolean
+}
+
+export type AuthenticatedAccount =
+  | {
+      accountType: 'GOVERNMENT'
+      id: string
+      email: string
+      governmentProfile: ApplicationUser
+      citizenProfile: null
+    }
+  | {
+      accountType: 'CITIZEN'
+      id: string
+      email: string
+      governmentProfile: null
+      citizenProfile: CitizenProfile
+    }
+
 export type Credential = {
   docHash: string
   docId: string
@@ -239,6 +262,7 @@ async function request<T>(path: string, init: RequestInit = {}, authenticated = 
 export const getHealth = () => request<{ ok: boolean; contract: string }>('/health', {}, false)
 export const getDepartments = () => request<Department[]>('/departments', {}, false)
 export const getMe = () => request<ApplicationUser>('/me')
+export const getAccount = () => request<AuthenticatedAccount>('/account')
 export const getCitizens = () => request<string[]>('/citizens')
 export const getCitizenAccounts = () => request<CitizenAccountOption[]>('/citizen-accounts')
 
@@ -268,6 +292,12 @@ export const getMonitoringOverview = () =>
 export const getCredentials = (citizen: string) =>
   request<{ citizen: string; documents: Credential[] }>(`/credentials/${encodeURIComponent(citizen)}`)
     .then((r) => r.documents)
+
+export const getMyCredentials = () =>
+  request<{ citizen: string; documents: Credential[] }>('/citizen/credentials').then((r) => r.documents)
+
+export const getDepartmentCredentials = () =>
+  request<{ documents: Credential[] }>('/department/credentials').then((r) => r.documents)
 
 export const verifyFile = (file: File) => {
   const form = new FormData()
@@ -328,6 +358,14 @@ export const createVerificationRequest = (documentId: string, purpose: string) =
 
 export const getVerificationRequest = (id: string) => request<VerificationRequest>(`/verification-requests/${encodeURIComponent(id)}`)
 export const listVerificationRequests = (state?: VerificationRequestState) => request<{ requests: VerificationRequest[]; page: { limit: number; offset: number; hasMore: boolean } }>(`/verification-requests${state ? `?state=${state}` : ''}`)
+export const listCitizenVerificationRequests = () => request<{ requests: VerificationRequest[] }>('/citizen/verification-requests').then((result) => result.requests)
+export const decideCitizenVerificationRequest = (id: string, decision: 'APPROVED' | 'DENIED') =>
+  request<VerificationRequest>(`/citizen/verification-requests/${encodeURIComponent(id)}/decision`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision }),
+  }).then((result) => {
+    emitSceneEvent({ kind: decision === 'APPROVED' ? 'CONSENT_APPROVED' : 'CONSENT_DENIED', docId: result.documentId })
+    return result
+  })
 export const completeVerificationRequest = (id: string) => request<{ request: VerificationRequest; verification: VerifyResult }>(`/verification-requests/${encodeURIComponent(id)}/complete`, { method: 'POST' })
 export const getDevelopmentConsentURL = (id: string) => request<{ requestId: string; consentUrl: string; developmentOnly: boolean }>(`/development/notifications/${encodeURIComponent(id)}`)
 export const getConsentDetails = (token: string) => request<ConsentDetails>(`/consent/${encodeURIComponent(token)}`, {}, false)

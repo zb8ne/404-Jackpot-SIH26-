@@ -139,6 +139,11 @@ func TestProtectedRoutesRejectUnauthenticatedRequests(t *testing.T) {
 	handler := rbacHandler(t, "ADMIN", "birth")
 	for _, endpoint := range []struct{ method, path string }{
 		{http.MethodGet, "/me"},
+		{http.MethodGet, "/account"},
+		{http.MethodGet, "/citizen/credentials"},
+		{http.MethodGet, "/citizen/documents/hash/download"},
+		{http.MethodGet, "/citizen/verification-requests"},
+		{http.MethodPost, "/citizen/verification-requests/request-id/decision"},
 		{http.MethodGet, "/citizens"},
 		{http.MethodPost, "/issue"},
 		{http.MethodPost, "/verify"},
@@ -146,6 +151,7 @@ func TestProtectedRoutesRejectUnauthenticatedRequests(t *testing.T) {
 		{http.MethodPost, "/revoke"},
 		{http.MethodPost, "/supersede"},
 		{http.MethodGet, "/credentials/Citizen"},
+		{http.MethodGet, "/department/credentials"},
 		{http.MethodGet, "/documents/hash/download"},
 		{http.MethodGet, "/citizen-accounts"},
 		{http.MethodPost, "/verification-requests"},
@@ -186,6 +192,11 @@ func TestOfficialCanIssueAndVerifyButCannotMutateLifecycle(t *testing.T) {
 	handler.ServeHTTP(response, authorizedRequest(http.MethodPost, "/issue", body, contentType))
 	if response.Code != http.StatusCreated {
 		t.Fatalf("issue status = %d, body = %s", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/department/credentials", nil, ""))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"docId":"DOC-1"`) {
+		t.Fatalf("department credentials status = %d, body = %s", response.Code, response.Body.String())
 	}
 
 	verifyBody := &bytes.Buffer{}
@@ -311,6 +322,160 @@ func TestMeUsesBackendOwnedProfile(t *testing.T) {
 	if !strings.Contains(response.Body.String(), `"email":"profile@example.gov"`) ||
 		strings.Contains(response.Body.String(), "jwt@example.gov") {
 		t.Fatalf("/me did not use backend profile: %s", response.Body.String())
+	}
+}
+
+func TestGovernmentProfileCannotUseCitizenOwnedRoutes(t *testing.T) {
+	handler := rbacHandler(t, "ADMIN", "birth")
+	for _, path := range []string{"/citizen/credentials", "/citizen/verification-requests"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, authorizedRequest(http.MethodGet, path, nil, ""))
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("GET %s status=%d, want 403", path, response.Code)
+		}
+	}
+}
+
+func TestAccountResolvesGovernmentProfile(t *testing.T) {
+	handler := rbacHandler(t, "ADMIN", "birth")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/account", nil, ""))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"accountType":"GOVERNMENT"`) ||
+		!strings.Contains(response.Body.String(), `"email":"profile@example.gov"`) ||
+		strings.Contains(response.Body.String(), "jwt@example.gov") {
+		t.Fatalf("/account did not use backend government profile: %s", response.Body.String())
+	}
+}
+
+func TestAccountResolvesCitizenProfile(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	supabaseID := "citizen-user"
+	if err := s.UpsertCitizenAccount(store.CitizenAccount{
+		ID: "citizen-1", SupabaseUserID: &supabaseID, DisplayName: "Citizen Name",
+		Email: "profile@example.test", Active: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	registry := &apiRegistry{records: map[[32]byte]chain.Record{}, current: map[string][32]byte{}}
+	handler := newHandler(registry, s, apiVerifier{user: &auth.User{ID: supabaseID, Email: "jwt@example.test"}}, "0xcontract")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/account", nil, ""))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"accountType":"CITIZEN"`) ||
+		!strings.Contains(response.Body.String(), `"displayName":"Citizen Name"`) ||
+		strings.Contains(response.Body.String(), "jwt@example.test") {
+		t.Fatalf("/account did not use backend citizen profile: %s", response.Body.String())
+	}
+}
+
+func TestAccountRejectsMissingAmbiguousAndInactiveProfiles(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		government *store.UserProfile
+		citizen    *store.CitizenAccount
+		wantStatus int
+	}{
+		{name: "missing", wantStatus: http.StatusForbidden},
+		{
+			name:       "ambiguous",
+			government: &store.UserProfile{SupabaseUserID: "user-1", Email: "admin@example.gov", DisplayName: "Admin", Role: "ADMIN", Active: true},
+			citizen:    &store.CitizenAccount{ID: "citizen-1", DisplayName: "Citizen", Email: "citizen@example.test", Active: true},
+			wantStatus: http.StatusConflict,
+		},
+		{
+			name:       "inactive citizen",
+			citizen:    &store.CitizenAccount{ID: "citizen-1", DisplayName: "Citizen", Email: "citizen@example.test", Active: false},
+			wantStatus: http.StatusForbidden,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			if test.government != nil {
+				if err := s.UpsertUserProfileAudited(*test.government, "birth", store.AuditActor{ID: "test", Role: "SYSTEM"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.citizen != nil {
+				supabaseID := "user-1"
+				test.citizen.SupabaseUserID = &supabaseID
+				if err := s.UpsertCitizenAccount(*test.citizen); err != nil {
+					t.Fatal(err)
+				}
+			}
+			registry := &apiRegistry{records: map[[32]byte]chain.Record{}, current: map[string][32]byte{}}
+			handler := newHandler(registry, s, apiVerifier{user: &auth.User{ID: "user-1"}}, "0xcontract")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/account", nil, ""))
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", response.Code, test.wantStatus, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestCitizenCanOnlyReadAndDownloadOwnCredentials(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	supabaseID := "citizen-user"
+	for _, account := range []store.CitizenAccount{
+		{ID: "citizen-1", SupabaseUserID: &supabaseID, DisplayName: "Citizen One", Email: "one@example.test", Active: true},
+		{ID: "citizen-2", DisplayName: "Citizen Two", Email: "two@example.test", Active: true},
+	} {
+		if err := s.UpsertCitizenAccount(account); err != nil {
+			t.Fatal(err)
+		}
+	}
+	one, two := "citizen-1", "citizen-2"
+	oneHash := "0x" + strings.Repeat("0", 63) + "1"
+	twoHash := "0x" + strings.Repeat("0", 63) + "2"
+	if err := s.Save(store.Document{DocHash: oneHash, DocID: "OWN-1", DocType: "birth_certificate", Citizen: "Citizen One", Filename: "own.pdf", CitizenAccountID: &one}, []byte("own pdf")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(store.Document{DocHash: twoHash, DocID: "OTHER-1", DocType: "birth_certificate", Citizen: "Citizen Two", Filename: "other.pdf", CitizenAccountID: &two}, []byte("other pdf")); err != nil {
+		t.Fatal(err)
+	}
+	registry := &apiRegistry{records: map[[32]byte]chain.Record{}, current: map[string][32]byte{}}
+	var anchored [32]byte
+	anchored[31] = 1
+	registry.records[anchored] = chain.Record{Found: true, DocID: "OWN-1", Status: chain.StatusValid}
+	handler := newHandler(registry, s, apiVerifier{user: &auth.User{ID: supabaseID}}, "0xcontract")
+	governmentResponse := httptest.NewRecorder()
+	handler.ServeHTTP(governmentResponse, authorizedRequest(http.MethodGet, "/department/credentials", nil, ""))
+	if governmentResponse.Code != http.StatusForbidden {
+		t.Fatalf("citizen government-route status=%d, want 403", governmentResponse.Code)
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/citizen/credentials", nil, ""))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "OWN-1") || strings.Contains(response.Body.String(), "OTHER-1") {
+		t.Fatalf("credential list was not ownership scoped: status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/citizen/documents/"+oneHash+"/download", nil, ""))
+	if response.Code != http.StatusOK || response.Body.String() != "own pdf" {
+		t.Fatalf("own download status=%d body=%q", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, authorizedRequest(http.MethodGet, "/citizen/documents/"+twoHash+"/download", nil, ""))
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("other citizen download status=%d, want 403", response.Code)
 	}
 }
 

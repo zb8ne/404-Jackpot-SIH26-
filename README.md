@@ -20,9 +20,10 @@ backend reveals the current chain-backed verdict.
 doppler run -- docker compose up
 ```
 
-That is the whole thing: Anvil, the contract deploy, department and citizen profiles,
-the API, the seeded documents, and the web app. Nothing but Docker is needed on the
-host — no Go, no Node, no Foundry.
+That starts Anvil, deploys the contract, provisions every configured government
+profile plus the demo citizens, and runs the API and web app. When fresh tokens for
+all three department Admins are present it also seeds the demo documents. Nothing
+but Docker is needed on the host — no Go, no Node, no Foundry.
 
 ```
 frontend  http://127.0.0.1:5173
@@ -45,8 +46,8 @@ WEB_PORT=5174 doppler run -- docker compose up
 
 Every value comes from the environment, so anything that exports them works. Copy
 `.env.example` to `.env` and fill it in, and plain `docker compose up` picks it up.
-Nothing is baked into an image, and a missing value fails immediately with a message
-naming the variable rather than a crash you have to decode.
+Nothing is baked into an image. The Supabase URL and frontend publishable key are
+required; government profile IDs and demo-document tokens are optional.
 
 ### On the host instead
 
@@ -64,16 +65,21 @@ Needs Go 1.22+, Node 20+, and [Foundry](https://getfoundry.sh)
 The backend needs `SUPABASE_URL`; the frontend needs `VITE_SUPABASE_URL` and
 `VITE_SUPABASE_PUBLISHABLE_KEY`. `VITE_API_URL` overrides the backend address, and
 `PUBLIC_WEB_URL` (default `http://127.0.0.1:5173`) is the base URL embedded in new QR
-codes. There is no authentication bypass.
+codes. `PUBLIC_API_URL` (default `http://127.0.0.1:8088`) is embedded as the direct
+QR PNG download link. There is no authentication bypass.
 
-Credential operations need a Supabase user with a backend profile. `make demo` and the
-compose `profiles` step provision the three department Admins from
-`SEED_BIRTH_USER_ID`, `SEED_TRANSPORT_USER_ID` and `SEED_EDUCATION_USER_ID`.
+Credential operations need a Supabase user with a backend profile. The Compose
+`profiles` step provisions each non-empty department Admin ID independently from
+`SEED_BIRTH_USER_ID`, `SEED_TRANSPORT_USER_ID`, and `SEED_EDUCATION_USER_ID`. It can
+also provision `SEED_BIRTH_OFFICIAL_USER_ID` and `SEED_CONTROLLER_USER_ID`. This lets
+a partial local environment run without inventing identities or assigning one user to
+multiple departments.
 
 The document seeder issues through the real REST API, so it also needs department Admin
 **access tokens** in `SEED_BIRTH_TOKEN`, `SEED_TRANSPORT_TOKEN` and
-`SEED_EDUCATION_TOKEN`. These are short-lived JWTs — they expire in about an hour, so a
-seeded run needs freshly minted tokens.
+`SEED_EDUCATION_TOKEN`. It skips document seeding unless all three are present, while
+the rest of the stack continues to start. These are short-lived JWTs — they expire in
+about an hour, so a seeded run needs freshly minted tokens.
 
 To provision a profile by hand, using an existing Supabase user's `sub`:
 
@@ -92,15 +98,19 @@ Citizen accounts require an email; phone is optional and is not used for consent
 ```sh
 cd backend
 go run ./cmd/citizen-seed -db credentials.db -id citizen-asha \
-  -name 'Asha Menon' -email asha@example.test
+  -name 'Asha Menon' -email asha@example.test \
+  -supabase-user-id '<supabase-user-id>'
 ```
 
 Use `-link-doc-id` only when explicitly linking an older stored credential. Ownership is
-never inferred from a name or email address.
+never inferred from a name or email address. `-supabase-user-id` links the citizen to
+Supabase login; rerunning the command without that optional flag preserves an existing
+identity link.
 
 ## The demo
 
-Either run path seeds the same documents into `./demo-files/`, one per verdict:
+With all three Admin tokens configured, either run path seeds the same documents into
+`./demo-files/`, one per verdict. A partial Compose run skips this fixture:
 
 | File | Verdict | |
 | --- | --- | --- |

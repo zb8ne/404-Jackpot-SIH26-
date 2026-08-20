@@ -2,6 +2,9 @@ package pdfdoc
 
 import (
 	"bytes"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"credreg/backend/internal/docid"
@@ -87,7 +90,8 @@ func TestStampIsDeterministic(t *testing.T) {
 func TestStampWithConfiguredVerificationURLPreservesMarker(t *testing.T) {
 	orig := Render("BIRTH CERTIFICATE", []string{"Name: Citizen"})
 	verificationURL := "http://127.0.0.1:5173/verify?docId=BC-2026-ABC123"
-	stamped, visible := StampWithQR(orig, "BC-2026-ABC123", verificationURL)
+	downloadURL := "http://127.0.0.1:8088/qr/BC-2026-ABC123/download.png"
+	stamped, visible := StampWithQRDownload(orig, "BC-2026-ABC123", verificationURL, downloadURL)
 	if !visible {
 		t.Fatal("expected visible registry page")
 	}
@@ -100,6 +104,46 @@ func TestStampWithConfiguredVerificationURLPreservesMarker(t *testing.T) {
 	}
 	if renderQR(verificationURL, 0, 0, 100) == renderQR("BC-2026-ABC123", 0, 0, 100) {
 		t.Fatal("QR rendering ignored configured payload")
+	}
+	if !bytes.Contains(stamped, []byte("/Subtype /FileAttachment")) ||
+		!bytes.Contains(stamped, []byte("BC-2026-ABC123-qr.png")) ||
+		!bytes.Contains(stamped, []byte("\x89PNG\r\n\x1a\n")) {
+		t.Fatal("registry page did not embed a downloadable QR PNG attachment")
+	}
+	if !bytes.Contains(stamped, []byte("/Subtype /Link")) || !bytes.Contains(stamped, []byte(escape(downloadURL))) {
+		t.Fatal("registry page did not include the browser-compatible QR download link")
+	}
+}
+
+func TestQRAttachmentFilenameIsSafe(t *testing.T) {
+	if got := safeAttachmentName("BC/2026 (A)"); got != "BC-2026--A-" {
+		t.Fatalf("safe attachment name=%q", got)
+	}
+}
+
+func TestQRAttachmentIsRecognizedByPDFTools(t *testing.T) {
+	if _, err := exec.LookPath("pdfdetach"); err != nil {
+		t.Skip("pdfdetach is not installed")
+	}
+	stamped, visible := StampWithQR(Render("BIRTH CERTIFICATE", []string{"Name: Citizen"}), "BC-QR-1", "http://example.test/verify?docId=BC-QR-1")
+	if !visible {
+		t.Fatal("expected visible registry page")
+	}
+	dir := t.TempDir()
+	pdfPath := filepath.Join(dir, "credential.pdf")
+	if err := os.WriteFile(pdfPath, stamped, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	listing, err := exec.Command("pdfdetach", "-list", pdfPath).CombinedOutput()
+	if err != nil || !bytes.Contains(listing, []byte("BC-QR-1-qr.png")) {
+		t.Fatalf("pdfdetach did not recognize attachment: err=%v output=%s", err, listing)
+	}
+	if output, err := exec.Command("pdfdetach", "-saveall", "-o", dir, pdfPath).CombinedOutput(); err != nil {
+		t.Fatalf("extract attachment: %v: %s", err, output)
+	}
+	png, err := os.ReadFile(filepath.Join(dir, "BC-QR-1-qr.png"))
+	if err != nil || !bytes.HasPrefix(png, []byte("\x89PNG\r\n\x1a\n")) {
+		t.Fatalf("extracted attachment is not a PNG: err=%v", err)
 	}
 }
 

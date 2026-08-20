@@ -6,6 +6,8 @@ This document is the frontend/backend contract for the implemented API, includin
 
 Protected requests require `Authorization: Bearer <Supabase access token>`. The backend validates the token, loads the backend-owned SQLite profile by Supabase `sub`, and derives role and department from that profile.
 
+Government and citizen records remain separate. `GET /account` is the unified session bootstrap endpoint; government-only operations continue to load `user_profiles` through RBAC middleware.
+
 - `CONTROLLER`: system-wide audit and monitoring only.
 - `ADMIN`: credential operations and audit history for its own department.
 - `OFFICIAL`: issue, verify, and department credential reads; no revoke, supersede, audit, or monitoring access.
@@ -69,7 +71,52 @@ Example:
 curl http://localhost:8088/departments
 ```
 
+### GET `/qr/{docId}/download.png`
+
+Purpose: download a PNG encoding the same verification URL stamped into an issued credential. Authentication: none. Unknown document IDs return `404`; arbitrary unissued IDs cannot be used as a QR generator.
+
+Response `200`: `image/png` with attachment filename `<document-id>-qr.png`.
+
 ## Identity
+
+### GET `/account`
+
+Purpose: resolve an authenticated Supabase identity to exactly one backend-owned government or citizen account. Authentication: required. Scope: the caller only.
+
+Government response `200`:
+
+```json
+{
+  "accountType":"GOVERNMENT",
+  "id":"supabase-user-id",
+  "email":"official@example.gov",
+  "governmentProfile":{
+    "id":"supabase-user-id",
+    "email":"official@example.gov",
+    "name":"Birth Official",
+    "role":"OFFICIAL",
+    "active":true,
+    "department":{"id":"birth","name":"Birth Registration Dept","docType":1,"docTypeName":"birth_certificate"}
+  },
+  "citizenProfile":null
+}
+```
+
+Citizen response `200`:
+
+```json
+{
+  "accountType":"CITIZEN",
+  "id":"citizen-asha",
+  "email":"asha@example.test",
+  "governmentProfile":null,
+  "citizenProfile":{"id":"citizen-asha","email":"asha@example.test","displayName":"Asha Menon","active":true}
+}
+```
+
+Errors: `401` authentication failure; `403` no linked account or inactive account; `409` the same Supabase identity is linked to both account tables; `500` lookup failure.
+
+The selected login card is presentation state only. The frontend compares it with this backend response and signs out on a mismatch; it never grants a role.
 
 ### GET `/me`
 
@@ -99,6 +146,24 @@ curl -H 'Authorization: Bearer <token>' http://localhost:8088/me
 ```
 
 ## Department credential reads
+
+### GET `/department/credentials`
+
+Purpose: list all stored credentials for the authenticated government user's department, enriched with current on-chain status. Authentication: required. Roles: Admin or Official. The backend derives the document type from the backend-owned department profile.
+
+Response `200`: `{"documents":[<credential objects>]}`. Errors: `401`; `403`; `500` storage failure.
+
+### GET `/citizen/credentials`
+
+Purpose: list every stamped credential issued to the authenticated citizen account, enriched with current on-chain status. Authentication: required. Account type: active Citizen. Ownership is derived from the verified Supabase `sub`; the request accepts no citizen identifier.
+
+Response `200` uses the same credential objects as `GET /credentials/{citizen}`. Errors: `401`; `403` missing/inactive citizen account; `409` ambiguous dual-linked identity; `500` storage failure.
+
+### GET `/citizen/documents/{hash}/download`
+
+Purpose: download the stored stamped PDF only when its `citizen_account_id` equals the authenticated citizen account. Authentication: required. Account type: active Citizen.
+
+Errors: `401`; `403` document belongs to another citizen or the identity is not an active Citizen; `404` unknown document; `409` ambiguous dual-linked identity; `500` storage failure.
 
 ### GET `/citizens`
 
@@ -179,6 +244,8 @@ All four operation families create Phase 2 audit records. A valid negative verif
 ### POST `/issue`
 
 Purpose: stamp, hash, anchor, and store a new credential. Authentication: required. Roles: Admin or Official. Scope: caller department.
+
+For PDFs that support the visible registry-page path, the stamped page contains the vector QR plus an embedded PNG attachment named `<document-id>-qr.png`. Its visible “Download QR PNG” label links directly to `{PUBLIC_API_URL}/qr/{docId}/download.png`, because many browser PDF viewers ignore file attachments. The PNG encodes the same verification URL, and both annotations are included before the stamped PDF hash is anchored. Fallback-stamped PDFs cannot carry the visible page or download controls.
 
 Multipart form-data:
 
@@ -452,11 +519,11 @@ curl -H 'Authorization: Bearer <controller-token>' http://localhost:8088/monitor
 
 ## Phase 3 citizen consent
 
-Supabase authenticates government users only. Citizens approve or deny through a random, expiring, request-specific email token. SQLite stores only the SHA-256 token hash. Raw tokens and consent URLs are never written to SQLite, audit details, or logs.
+Supabase authenticates government and citizen users. New requests are delivered only to the linked citizen's authenticated web inbox; no email or raw consent URL is generated for the active flow. Legacy token endpoints remain compatible with older token-backed records.
 
 New credentials are stamped with `{PUBLIC_WEB_URL}/verify?docId={url-encoded-document-id}` before hashing and anchoring. Existing PDFs with bare-ID QR values remain valid and readable. The QR frontend creates a consent request and does not display a registry verdict before completion.
 
-Verification requests expire 15 minutes after creation. States are `PENDING`, `APPROVED`, `DENIED`, `EXPIRED`, and `COMPLETED`. An identical repeated approve/deny is idempotent; conflicting decisions and repeated completion return `409`. Expiry is enforced when requests or tokens are read or changed.
+Verification requests expire 24 hours after creation. States are `PENDING`, `APPROVED`, `DENIED`, `EXPIRED`, and `COMPLETED`. Expiry is enforced when requests are read or changed.
 
 ### GET `/citizen-accounts`
 
@@ -512,7 +579,7 @@ Government request APIs return:
   "completedResult":null,
   "version":1,
   "notificationStatus":"SUCCEEDED",
-  "notificationDestination":"a***@example.test"
+  "notificationDestination":"citizen-asha"
 }
 ```
 
@@ -537,11 +604,11 @@ Response `201`:
   "id":"opaque-request-id",
   "state":"PENDING",
   "expiresAt":"2026-08-18T10:45:45Z",
-  "notification":{"channel":"EMAIL","destination":"a***@example.test","status":"SUCCEEDED"}
+  "notification":{"channel":"WEB_INBOX","destination":"citizen-asha","status":"SUCCEEDED"}
 }
 ```
 
-Errors: `400` malformed/missing purpose or document ID; `401`; `403` Controller or cross-department credential; `404` unknown credential; `409` unlinked/inactive citizen account; `500` persistence failure; `502` blockchain or development-notification failure. A notification failure leaves the request recorded and audited as failed.
+Errors: `400` malformed/missing purpose or document ID; `401`; `403` Controller or cross-department credential; `404` unknown credential; `409` unlinked/inactive citizen account; `500` persistence or inbox-delivery recording failure; `502` blockchain failure.
 
 ### GET `/verification-requests`
 
@@ -583,7 +650,23 @@ The real `request` value is the complete request object.
 
 Errors: `401`; `403`; `404`; `409` not approved, expired, denied, or already completed; `500` persistence/reference failure; `502` blockchain read failure.
 
-### GET `/consent/{token}`
+### GET `/citizen/verification-requests`
+
+Purpose: list verification requests belonging to the authenticated citizen account. Authentication: required. Account type: active Citizen. Ownership is derived from the verified Supabase identity. Results are newest first and pending requests are lazily marked expired when their 24-hour deadline has passed.
+
+Response `200`: `{"requests":[<verification request objects>]}`.
+
+Errors: `401`; `403` missing/inactive citizen profile; `409` ambiguous dual-linked identity; `500` storage failure.
+
+### POST `/citizen/verification-requests/{id}/decision`
+
+Purpose: atomically approve or deny a pending request owned by the authenticated citizen. Authentication: required. Account type: active Citizen.
+
+JSON body: `{"decision":"APPROVED"}` or `{"decision":"DENIED"}`. An identical repeated decision is idempotent. The decision, timestamp, `WEB_INBOX` channel, and audit event are persisted in one transaction, so the result survives logout and browser closure.
+
+Errors: `400` invalid decision; `401`; `403` missing/inactive citizen profile; `404` request absent or owned by another citizen; `409` conflicting/already completed decision; `410` expired request; `500` persistence failure.
+
+### GET `/consent/{token}` (legacy)
 
 Purpose: public one-time email-link context. Authentication: none. The token itself authenticates access to this single request.
 
