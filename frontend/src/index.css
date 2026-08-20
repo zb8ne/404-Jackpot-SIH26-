@@ -16,8 +16,18 @@ body {
   @apply antialiased;
 }
 
-/* Admin-only visual direction: warm civic-office neutrals and a Birth coral
-   accent borrowed from the characters and wood tones in the registry floor. */
+/* App-wide visual direction (not admin-only — applied on AppShell, Login,
+   Consent, Demo, and LiveFloor, i.e. every role): warm civic-office neutrals
+   and a Birth coral accent borrowed from the characters and wood tones in
+   the registry floor.
+
+   The rules below match Tailwind classes by SUBSTRING (`[class*='...']`)
+   and override with `!important`, so any element that ends up under a
+   `.civic-theme` ancestor and happens to use one of these class name
+   fragments (bg-slate-900, text-slate-4xx/5xx, text-sky-*, etc.) gets
+   silently recolored — intentional or not. Adding a new component inside
+   an existing `.civic-theme` wrapper means it inherits this theme whether
+   or not that was the goal; check here first if a color looks wrong. */
 .civic-workspace {
   color: #f4efe7;
   background:
