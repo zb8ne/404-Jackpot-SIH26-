@@ -15,28 +15,6 @@ export type ShellTab =
 
 type NavigationItem = { id: ShellTab; label: string; hint: string }
 
-const GOVERNMENT_NAVIGATION: Record<'CONTROLLER' | 'ADMIN' | 'OFFICIAL', NavigationItem[]> = {
-  CONTROLLER: [
-    { id: 'monitoring', label: 'Monitoring', hint: 'System overview' },
-    { id: 'audit', label: 'Audit', hint: 'Registry activity' },
-  ],
-  ADMIN: [
-    { id: 'verify', label: 'Verify', hint: 'Check a document' },
-    { id: 'issue', label: 'Issue', hint: 'Create a credential' },
-    { id: 'citizen', label: 'Credentials', hint: 'Department records' },
-    { id: 'requests', label: 'Requests', hint: 'Citizen consent' },
-    { id: 'revoke', label: 'Revoke', hint: 'End validity' },
-    { id: 'supersede', label: 'Supersede', hint: 'Issue a replacement' },
-    { id: 'audit', label: 'Audit', hint: 'Department activity' },
-  ],
-  OFFICIAL: [
-    { id: 'verify', label: 'Verify', hint: 'Check a document' },
-    { id: 'issue', label: 'Issue', hint: 'Create a credential' },
-    { id: 'citizen', label: 'Credentials', hint: 'Department records' },
-    { id: 'requests', label: 'Requests', hint: 'Citizen consent' },
-  ],
-}
-
 const CITIZEN_NAVIGATION: NavigationItem[] = [
   { id: 'my-credentials', label: 'My credentials', hint: 'Issued documents' },
   { id: 'inbox', label: 'Inbox', hint: 'Access requests' },
@@ -58,7 +36,7 @@ export function AppShell({
   children: ReactNode
 }) {
   const government = account.accountType === 'GOVERNMENT' ? account.governmentProfile : null
-  const navigation = government ? GOVERNMENT_NAVIGATION[government.role] : CITIZEN_NAVIGATION
+  const navigation = government ? [] : CITIZEN_NAVIGATION
   const displayName = government?.name ?? account.citizenProfile?.displayName
   const contextLabel = government
     ? government.department?.name ?? 'System oversight'
@@ -91,7 +69,7 @@ export function AppShell({
             </div>
           </div>
 
-          <nav aria-label="Workspace navigation" className="mt-6 flex gap-2 overflow-x-auto pb-1">
+          {navigation.length > 0 && <nav aria-label="Workspace navigation" className="mt-6 flex gap-2 overflow-x-auto pb-1">
             {navigation.map((item) => (
               <button
                 key={item.id}
@@ -108,7 +86,7 @@ export function AppShell({
                 <span className="block text-xs opacity-70">{item.hint}</span>
               </button>
             ))}
-          </nav>
+          </nav>}
         </div>
       </header>
 

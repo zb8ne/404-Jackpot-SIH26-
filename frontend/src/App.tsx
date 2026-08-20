@@ -1,12 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getAccount, getHealth, type ApplicationUser, type AuthenticatedAccount } from './api'
-import { Citizen } from './screens/Citizen'
-import { Issue } from './screens/Issue'
-import { Verify } from './screens/Verify'
 import { LOGIN_INTENT_KEY, Login, type LoginIntent } from './screens/Login'
-import { AuditEvents } from './screens/AuditEvents'
-import { Monitoring } from './screens/Monitoring'
-import { Revoke, Supersede } from './screens/Lifecycle'
 import { Consent } from './screens/Consent'
 import { VerificationRequestFlow } from './screens/VerificationRequest'
 import { supabase } from './lib/supabase'
@@ -14,7 +8,6 @@ import { lazy, Suspense } from 'react'
 import { AppShell, type ShellTab } from './components/AppShell'
 import { CitizenDashboard } from './screens/CitizenDashboard'
 import { CitizenInbox } from './screens/CitizenInbox'
-import { GovernmentRequests } from './screens/GovernmentRequests'
 
 // Pixi + the scene engine are a lot of bytes for a form-filling app to load up
 // front; only the account holders who actually see live activity pay for it.
@@ -50,7 +43,11 @@ export default function App() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setAccount(null)
+        setProfile(null)
+      }
       setSession(session)
     })
 
@@ -72,18 +69,16 @@ export default function App() {
     }
 
     getAccount()
-      .then(async (resolvedAccount) => {
+      .then((resolvedAccount) => {
         const intent = sessionStorage.getItem(LOGIN_INTENT_KEY) as LoginIntent | null
         const actualRole = resolvedAccount.accountType === 'GOVERNMENT'
           ? resolvedAccount.governmentProfile.role
           : 'CITIZEN'
-        if (!intent || intent !== actualRole) {
-          setLoginError(!intent
-            ? 'Choose an account type before signing in.'
-            : `This account is registered as ${actualRole.toLowerCase()}, not ${intent.toLowerCase()}.`)
-          await supabase.auth.signOut()
-          return
-        }
+        // The selected card controls only the sign-in presentation. The
+        // backend-resolved account remains authoritative for the workspace and
+        // permissions, so a stale or mistaken card must never sign a valid
+        // application account back out.
+        if (intent !== actualRole) sessionStorage.setItem(LOGIN_INTENT_KEY, actualRole)
         setAccount(resolvedAccount)
         setProfile(resolvedAccount.governmentProfile)
         setTab(defaultTabFor(resolvedAccount))
@@ -115,8 +110,12 @@ export default function App() {
 
 
   async function logout() {
-    await supabase.auth.signOut()
+    // Clear this before Supabase emits SIGNED_OUT; Login may mount in response
+    // to that event and must not initialize itself with the previous role.
     sessionStorage.removeItem(LOGIN_INTENT_KEY)
+    setAccount(null)
+    setProfile(null)
+    await supabase.auth.signOut()
   }
 
   if (!account) {
@@ -142,16 +141,7 @@ export default function App() {
       {account.accountType === 'CITIZEN' ? (
         tab === 'my-credentials' ? <CitizenDashboard /> : <CitizenInbox />
       ) : profile ? (
-          <>
-            {qrDocumentId && profile.role !== 'CONTROLLER' ? <VerificationRequestFlow documentId={qrDocumentId} /> : tab === 'verify' && <Verify />}
-            {tab === 'issue' && <Issue />}
-            {tab === 'revoke' && profile.role === 'ADMIN' && <Revoke />}
-            {tab === 'supersede' && profile.role === 'ADMIN' && <Supersede />}
-            {tab === 'citizen' && <Citizen />}
-            {tab === 'requests' && <GovernmentRequests />}
-            {tab === 'audit' && profile.role !== 'OFFICIAL' && <AuditEvents />}
-            {tab === 'monitoring' && profile.role === 'CONTROLLER' && <Monitoring />}
-          </>
+          qrDocumentId && profile.role !== 'CONTROLLER' ? <VerificationRequestFlow documentId={qrDocumentId} /> : null
         ) : null}
     </AppShell>
   )

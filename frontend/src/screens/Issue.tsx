@@ -12,7 +12,7 @@ import {
 } from '../api'
 import { Hash } from '../components/Hash'
 
-export function Issue() {
+export function Issue({ onSuccess }: { onSuccess?: (result: IssueResult) => void } = {}) {
   const [departments, setDepartments] = useState<Department[]>([])
   const [dept, setDept] = useState('')
   const [citizens, setCitizens] = useState<CitizenAccountOption[]>([])
@@ -68,16 +68,16 @@ function generateDocId() {
     setError('')
     setResult(null)
     try {
-      setResult(
-        await issueDocument({
-          file,
-          dept,
-          docType: selected.docTypeName,
-          docId: docId.trim(),
-          citizen: citizens.find((candidate) => candidate.id === citizenAccountId)?.displayName ?? '',
-          citizenAccountId,
-        }),
-      )
+      const issued = await issueDocument({
+        file,
+        dept,
+        docType: selected.docTypeName,
+        docId: docId.trim(),
+        citizen: citizens.find((candidate) => candidate.id === citizenAccountId)?.displayName ?? '',
+        citizenAccountId,
+      })
+      setResult(issued)
+      onSuccess?.(issued)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
