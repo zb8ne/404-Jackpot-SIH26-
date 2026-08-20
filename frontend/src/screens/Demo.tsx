@@ -138,7 +138,7 @@ export function Demo() {
       <header className="border-b border-slate-800 bg-slate-900/60">
         <div className="mx-auto max-w-6xl px-6 py-5">
           <h1 className="text-2xl font-black tracking-tight text-slate-100">
-            Government Credential Registry
+            PramanSetu
           </h1>
           <p className="text-sm text-slate-500">
             {!profileChecked

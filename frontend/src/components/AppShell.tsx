@@ -57,10 +57,10 @@ export function AppShell({
         <div className="mx-auto max-w-[1600px] px-4 py-3 sm:px-6">
           <div className="flex items-center justify-between gap-4">
             <div className="flex min-w-0 items-center gap-3">
-              <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border text-lg font-black ${accent}`}>CR</div>
+              <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border text-lg font-black ${accent}`}>PS</div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <h1 className="truncate text-sm font-bold text-slate-100">Credential Registry</h1>
+                  <h1 className="truncate text-sm font-bold text-slate-100">PramanSetu</h1>
                   {government?.department && <span className={`hidden rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider sm:inline ${accent}`}>{government.department.name}</span>}
                 </div>
                 <div className="mt-0.5 flex items-center gap-2 text-[11px] text-slate-500">

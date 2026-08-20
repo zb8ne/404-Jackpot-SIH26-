@@ -53,7 +53,7 @@ export function Login({ initialError = '' }: { initialError?: string }) {
       <div className="w-full max-w-5xl">
         <div className="mb-8 text-center">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-sky-400">Secure credential registry</p>
-          <h1 className="mt-3 text-4xl font-black tracking-tight text-slate-100">Government Credential Registry</h1>
+          <h1 className="mt-3 text-4xl font-black tracking-tight text-slate-100">PramanSetu</h1>
           <p className="mx-auto mt-3 max-w-2xl text-slate-400">
             Choose how you use the registry. Your permissions are always confirmed by the backend after sign-in.
           </p>
