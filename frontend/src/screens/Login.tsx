@@ -74,29 +74,34 @@ export function Login({ initialError = '' }: { initialError?: string }) {
         ) : (
           <div className="grid gap-4 md:grid-cols-3">
             <RoleCard
+              icon="◈"
+              tone="sky"
               eyebrow="Oversight"
               title="Controller"
               description="Monitor registry activity and inspect system-wide audit history."
               onClick={() => choose('CONTROLLER')}
             />
 
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-6">
+            <div className={`rounded-lg border-2 border-slate-700 bg-slate-950/90 p-6 shadow-[4px_4px_0_0_rgba(16,185,129,0.4)] transition-all duration-100 ${authorityOpen ? '' : 'hover:-translate-x-0.5 hover:-translate-y-0.5'}`}>
               <button type="button" onClick={() => setAuthorityOpen((open) => !open)} className="w-full text-left">
-                <span className="text-xs font-semibold uppercase tracking-widest text-emerald-400">Government</span>
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border-2 border-emerald-500/40 bg-emerald-500/15 font-mono text-xl font-black text-emerald-300 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.2)]">▤</span>
+                <span className="mt-4 block text-xs font-semibold uppercase tracking-widest text-emerald-400">Government</span>
                 <span className="mt-3 block text-2xl font-bold text-slate-100">Government Authority</span>
                 <span className="mt-2 block text-sm leading-6 text-slate-400">Department staff who issue and verify credentials.</span>
-                <span className="mt-5 block text-sm font-semibold text-emerald-300">{authorityOpen ? 'Hide account types ↑' : 'Choose account type ↓'}</span>
+                <span className="mt-5 block text-sm font-bold uppercase tracking-wider text-emerald-300">{authorityOpen ? 'Hide account types ↑' : 'Choose account type ↓'}</span>
               </button>
 
               {authorityOpen && (
-                <div className="mt-5 grid gap-3 border-t border-slate-800 pt-5">
-                  <AuthorityChoice title="Admin" description="Issue, revoke, and supersede" onClick={() => choose('ADMIN')} />
-                  <AuthorityChoice title="Official" description="Issue and verify credentials" onClick={() => choose('OFFICIAL')} />
+                <div className="mt-5 grid gap-3 border-t-2 border-slate-800 pt-5">
+                  <AuthorityChoice icon="+" tone="amber" title="Admin" description="Issue, revoke, and supersede" onClick={() => choose('ADMIN')} />
+                  <AuthorityChoice icon="✓" tone="cyan" title="Official" description="Issue and verify credentials" onClick={() => choose('OFFICIAL')} />
                 </div>
               )}
             </div>
 
             <RoleCard
+              icon="⌂"
+              tone="rose"
               eyebrow="Personal"
               title="Citizen"
               description="Access your issued credentials and respond to verification requests."
@@ -172,22 +177,48 @@ function LoginForm({
   )
 }
 
-function RoleCard({ eyebrow, title, description, onClick }: { eyebrow: string; title: string; description: string; onClick: () => void }) {
+// Same retro-HUD language as the Live Floor action rail: hard offset
+// colored shadows and a bevel-highlighted icon badge instead of soft
+// Tailwind shadows, so the entry screen reads as one piece with the floor
+// a signed-in user lands on next, not a separate "normal web app" login.
+const ROLE_TONES: Record<string, { badge: string; shadow: string; text: string }> = {
+  sky: { badge: 'border-sky-500/40 bg-sky-500/15 text-sky-300', shadow: 'shadow-[4px_4px_0_0_rgba(14,165,233,0.4)]', text: 'text-sky-400' },
+  emerald: { badge: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300', shadow: 'shadow-[4px_4px_0_0_rgba(16,185,129,0.4)]', text: 'text-emerald-400' },
+  amber: { badge: 'border-amber-500/40 bg-amber-500/15 text-amber-300', shadow: 'shadow-[4px_4px_0_0_rgba(245,158,11,0.4)]', text: 'text-amber-400' },
+  rose: { badge: 'border-rose-500/40 bg-rose-500/15 text-rose-300', shadow: 'shadow-[4px_4px_0_0_rgba(244,63,94,0.4)]', text: 'text-rose-400' },
+  cyan: { badge: 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300', shadow: 'shadow-[4px_4px_0_0_rgba(6,182,212,0.4)]', text: 'text-cyan-400' },
+}
+
+function RoleCard({ icon, tone, eyebrow, title, description, onClick }: { icon: string; tone: keyof typeof ROLE_TONES; eyebrow: string; title: string; description: string; onClick: () => void }) {
+  const t = ROLE_TONES[tone]
   return (
-    <button type="button" onClick={onClick} className="rounded-2xl border border-slate-800 bg-slate-900/50 p-6 text-left transition hover:-translate-y-1 hover:border-sky-500/60 hover:bg-slate-900">
-      <span className="text-xs font-semibold uppercase tracking-widest text-sky-400">{eyebrow}</span>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-lg border-2 border-slate-700 bg-slate-950/90 p-6 text-left transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-0 active:translate-y-0 active:shadow-none ${t.shadow}`}
+    >
+      <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-md border-2 font-mono text-xl font-black shadow-[inset_0_1px_0_0_rgba(255,255,255,0.2)] ${t.badge}`}>{icon}</span>
+      <span className={`mt-4 block text-xs font-semibold uppercase tracking-widest ${t.text}`}>{eyebrow}</span>
       <span className="mt-3 block text-2xl font-bold text-slate-100">{title}</span>
       <span className="mt-2 block text-sm leading-6 text-slate-400">{description}</span>
-      <span className="mt-5 block text-sm font-semibold text-sky-300">Continue →</span>
+      <span className={`mt-5 block text-sm font-bold uppercase tracking-wider ${t.text}`}>Continue →</span>
     </button>
   )
 }
 
-function AuthorityChoice({ title, description, onClick }: { title: string; description: string; onClick: () => void }) {
+function AuthorityChoice({ icon, tone, title, description, onClick }: { icon: string; tone: keyof typeof ROLE_TONES; title: string; description: string; onClick: () => void }) {
+  const t = ROLE_TONES[tone]
   return (
-    <button type="button" onClick={onClick} className="rounded-xl border border-slate-700 bg-slate-950/60 px-4 py-3 text-left transition hover:border-emerald-500/60">
-      <span className="font-semibold text-slate-100">{title}</span>
-      <span className="mt-1 block text-xs text-slate-500">{description}</span>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex items-center gap-3 rounded-md border-2 border-slate-700 bg-slate-950/60 px-4 py-3 text-left transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-0 active:translate-y-0 active:shadow-none ${t.shadow}`}
+    >
+      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded border-2 font-mono text-sm font-black ${t.badge}`}>{icon}</span>
+      <span>
+        <span className="font-semibold text-slate-100">{title}</span>
+        <span className="mt-1 block text-xs text-slate-500">{description}</span>
+      </span>
     </button>
   )
 }
