@@ -49,7 +49,7 @@ export function Login({ initialError = '' }: { initialError?: string }) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-6 py-12">
+    <div className="civic-theme civic-workspace flex min-h-screen items-center justify-center px-6 py-12">
       <div className="w-full max-w-5xl">
         <div className="mb-8 text-center">
           <p className="text-xs font-semibold uppercase tracking-[0.3em] text-sky-400">Secure credential registry</p>

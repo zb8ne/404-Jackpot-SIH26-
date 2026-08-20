@@ -20,7 +20,7 @@ export function Consent({ token }: { token: string }) {
     } catch (e) { setError(message(e)) } finally { setBusy(false) }
   }
 
-  return <main className="flex min-h-screen items-center justify-center px-6 py-12">
+  return <main className="civic-theme civic-workspace flex min-h-screen items-center justify-center px-6 py-12">
     <section className="w-full max-w-xl rounded-2xl border border-slate-800 bg-slate-900/60 p-8">
       <p className="text-xs font-semibold uppercase tracking-widest text-sky-400">Citizen consent</p>
       <h1 className="mt-2 text-3xl font-black text-slate-100">Credential verification request</h1>

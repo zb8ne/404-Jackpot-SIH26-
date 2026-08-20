@@ -82,14 +82,14 @@ function ActionRail({ actions, side, active, onSelect, floating = false }: { act
           onClick={() => onSelect(action)}
           aria-pressed={active === action.id}
           title={`${action.label} — open workspace`}
-          className={`group flex min-h-20 items-center gap-3 rounded-2xl border bg-slate-950/90 p-3 text-left shadow-xl shadow-black/20 backdrop-blur transition hover:-translate-y-0.5 hover:bg-slate-900 ${floating ? 'w-28 flex-col justify-center text-center xl:w-32' : ''} ${active === action.id ? 'border-slate-400 ring-2 ring-sky-500/30' : 'border-slate-700/80'}`}
+          className={`group flex items-center rounded-2xl border bg-slate-950/90 p-3 shadow-xl shadow-black/20 backdrop-blur transition hover:-translate-y-0.5 hover:bg-slate-900 ${floating ? 'h-[5.5rem] w-28 flex-col justify-center gap-2 text-center xl:w-32' : 'min-h-20 gap-3 text-left'} ${active === action.id ? 'border-slate-400 ring-2 ring-sky-500/30' : 'border-slate-700/80'}`}
         >
           <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border font-mono text-xl font-black transition ${TONES[action.tone]}`}>
             {action.icon}
           </span>
-          <span>
-            <span className="block text-sm font-bold text-slate-200">{action.label}</span>
-            <span className="block text-[11px] leading-tight text-slate-500">{action.hint}</span>
+          <span className={floating ? 'w-full' : ''}>
+            <span className={`block font-bold text-slate-200 ${floating ? 'whitespace-nowrap text-xs leading-none' : 'text-sm'}`}>{action.label}</span>
+            {!floating && <span className="block text-[11px] leading-tight text-slate-500">{action.hint}</span>}
           </span>
         </button>
       ))}
@@ -129,6 +129,7 @@ export function LiveFloor({ profile }: { profile: ApplicationUser }) {
   // Queue events that arrive before the scene has finished booting.
   const pendingRef = useRef<SceneEvent[]>([])
   const actions = ACTIONS[profile.role]
+  const roleAccent = profile.role === 'ADMIN' ? 'text-[#f07868]' : profile.role === 'OFFICIAL' ? 'text-[#65c8a3]' : 'text-[#e8b45b]'
   const toggleAction = (action: FloorAction) => {
     setSelectedAction((current) => current?.id === action.id ? null : action)
   }
@@ -166,10 +167,10 @@ export function LiveFloor({ profile }: { profile: ApplicationUser }) {
   }, [profile.role])
 
   return (
-    <div className="mb-8 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/40">
+    <div className="civic-theme mb-8 overflow-hidden rounded-3xl border border-[#493f39] bg-[#181b1b] shadow-2xl shadow-black/30">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between px-5 py-3 text-left"
+        className="flex w-full items-center justify-between border-b border-[#3a322e] bg-[#201d1b] px-5 py-3 text-left"
       >
         <span className="flex items-center gap-2 text-sm font-semibold text-slate-300">
           Live floor
@@ -181,14 +182,14 @@ export function LiveFloor({ profile }: { profile: ApplicationUser }) {
       </button>
 
       {open && (
-        <div className="border-t border-slate-800 px-4 py-5 sm:px-5">
+        <div className="bg-[radial-gradient(circle_at_50%_0%,rgba(240,120,104,.07),transparent_36%),linear-gradient(180deg,#181b1b,#121516)] px-4 py-5 sm:px-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-400">{profile.role} floor</p>
-              <p className="text-sm text-slate-400">{profile.department?.name ?? 'System-wide registry oversight'}</p>
+              <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${roleAccent}`}>{profile.role} operations floor</p>
+              <p className="text-sm text-[#aaa198]">{profile.department?.name ?? 'System-wide registry oversight'}</p>
             </div>
-            <span className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              Live workspace
+            <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
+              ● Live workspace
             </span>
           </div>
 
