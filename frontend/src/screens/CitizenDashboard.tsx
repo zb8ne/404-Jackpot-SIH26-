@@ -34,7 +34,7 @@ export function CitizenDashboard() {
               <Row label="Issued" value={doc.issuedAt} />
               <Row label="Document hash" value={<Hash value={doc.docHash} />} />
             </dl>
-            <button type="button" onClick={() => void downloadDocument(`/citizen/documents/${doc.docHash}/download`, doc.filename).catch((e) => setError(String(e)))} className="mt-6 w-full rounded-xl bg-sky-600 px-4 py-3 font-semibold text-white hover:bg-sky-500">Download stamped PDF</button>
+            <button type="button" onClick={() => void downloadDocument(`/citizen/documents/${doc.docHash}/download`, doc.filename).catch((e) => setError(String(e)))} className="mt-6 w-full rounded-md border-2 border-sky-900 bg-sky-600 px-4 py-3 font-bold uppercase tracking-wide text-white shadow-[4px_4px_0_0_rgba(14,165,233,0.5)] transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:bg-sky-500 active:translate-x-0 active:translate-y-0 active:shadow-none">Download stamped PDF</button>
           </article>
         })}
       </div>

@@ -57,10 +57,10 @@ export function AppShell({
         <div className="mx-auto max-w-[1600px] px-4 py-3 sm:px-6">
           <div className="flex items-center justify-between gap-4">
             <div className="flex min-w-0 items-center gap-3">
-              <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border text-lg font-black ${accent}`}>CR</div>
+              <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border-2 text-lg font-black shadow-[inset_0_1px_0_0_rgba(255,255,255,0.2)] ${accent}`}>PS</div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <h1 className="truncate text-sm font-bold text-slate-100">Credential Registry</h1>
+                  <h1 className="truncate text-sm font-bold text-slate-100">PramanSetu</h1>
                   {government?.department && <span className={`hidden rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider sm:inline ${accent}`}>{government.department.name}</span>}
                 </div>
                 <div className="mt-0.5 flex items-center gap-2 text-[11px] text-slate-500">
@@ -77,7 +77,11 @@ export function AppShell({
                 <p className="text-[11px] uppercase tracking-wider text-slate-500">{roleLabel} · {contextLabel}</p>
               </div>
               <div className="flex h-9 w-9 items-center justify-center rounded-full border border-[#5b4d45] bg-[#292522] text-xs font-black text-[#f4efe7]">{initials}</div>
-              <button type="button" onClick={onSignOut} className="rounded-lg border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-400 transition hover:border-slate-500 hover:bg-slate-800 hover:text-slate-100">
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="rounded-md border-2 border-slate-700 px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-400 shadow-[3px_3px_0_0_rgba(100,116,139,0.3)] transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:border-slate-500 hover:text-slate-100 active:translate-x-0 active:translate-y-0 active:shadow-none"
+              >
                 Sign out
               </button>
             </div>
@@ -90,14 +94,14 @@ export function AppShell({
                 type="button"
                 onClick={() => onTabChange(item.id)}
                 aria-current={activeTab === item.id ? 'page' : undefined}
-                className={`shrink-0 rounded-xl px-4 py-3 text-left transition ${
+                className={`shrink-0 rounded-md border-2 px-4 py-3 text-left transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-0 active:translate-y-0 active:shadow-none ${
                   activeTab === item.id
-                    ? 'bg-sky-600 text-white shadow-lg shadow-sky-950/30'
-                    : 'border border-slate-800 text-slate-400 hover:border-slate-700 hover:bg-slate-800 hover:text-slate-200'
+                    ? 'border-sky-400 bg-sky-500/15 text-white shadow-[3px_3px_0_0_rgba(14,165,233,0.45)]'
+                    : 'border-slate-700 text-slate-400 shadow-[3px_3px_0_0_rgba(100,116,139,0.25)] hover:border-slate-500 hover:text-slate-200'
                 }`}
               >
-                <span className="block text-sm font-semibold">{item.label}</span>
-                <span className="block text-xs opacity-70">{item.hint}</span>
+                <span className="block text-sm font-bold uppercase tracking-wide">{item.label}</span>
+                <span className="block text-xs normal-case opacity-70">{item.hint}</span>
               </button>
             ))}
           </nav>}

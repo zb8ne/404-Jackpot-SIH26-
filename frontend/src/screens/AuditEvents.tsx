@@ -42,7 +42,7 @@ export function AuditEvents() {
         {!busy && !events.length && !error && <p className="text-slate-500">No matching audit events.</p>}
       </div>
       {hasMore && nextBefore && (
-        <button type="button" disabled={busy} onClick={() => load(nextBefore, true)} className="w-full rounded-xl border border-slate-700 py-3 font-semibold text-slate-300 hover:bg-slate-800 disabled:opacity-50">Load older events</button>
+        <button type="button" disabled={busy} onClick={() => load(nextBefore, true)} className="w-full rounded-md border-2 border-slate-700 py-3 font-bold uppercase tracking-wide text-slate-300 shadow-[3px_3px_0_0_rgba(100,116,139,0.3)] transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:border-slate-500 active:translate-x-0 active:translate-y-0 active:shadow-none disabled:opacity-50 disabled:shadow-none">Load older events</button>
       )}
     </div>
   )

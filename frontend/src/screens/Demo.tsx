@@ -45,9 +45,9 @@ const SAMPLES: Array<{ label: string; tone: 'good' | 'bad' | 'neutral'; event: S
 ]
 
 const TONE_CLASS: Record<'good' | 'bad' | 'neutral', string> = {
-  good: 'border-emerald-500/40 hover:border-emerald-400 hover:bg-emerald-500/10',
-  bad: 'border-rose-500/40 hover:border-rose-400 hover:bg-rose-500/10',
-  neutral: 'border-slate-700 hover:border-slate-500 hover:bg-slate-800/60',
+  good: 'border-emerald-500/40 shadow-[3px_3px_0_0_rgba(16,185,129,0.35)] hover:border-emerald-400 hover:bg-emerald-500/10',
+  bad: 'border-rose-500/40 shadow-[3px_3px_0_0_rgba(244,63,94,0.35)] hover:border-rose-400 hover:bg-rose-500/10',
+  neutral: 'border-slate-700 shadow-[3px_3px_0_0_rgba(100,116,139,0.25)] hover:border-slate-500 hover:bg-slate-800/60',
 }
 
 type StepStatus = 'pending' | 'running' | 'done' | 'error'
@@ -138,7 +138,7 @@ export function Demo() {
       <header className="border-b border-slate-800 bg-slate-900/60">
         <div className="mx-auto max-w-6xl px-6 py-5">
           <h1 className="text-2xl font-black tracking-tight text-slate-100">
-            Government Credential Registry
+            PramanSetu
           </h1>
           <p className="text-sm text-slate-500">
             {!profileChecked
@@ -158,7 +158,7 @@ export function Demo() {
           <p className="text-lg text-slate-200">{caption || <span className="text-slate-600">idle</span>}</p>
           <button
             onClick={() => apiRef.current?.reset()}
-            className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-slate-500 hover:text-slate-100"
+            className="rounded-md border-2 border-slate-700 px-4 py-2 text-sm font-bold uppercase tracking-wide text-slate-300 shadow-[3px_3px_0_0_rgba(100,116,139,0.3)] transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:border-slate-500 hover:text-slate-100 active:translate-x-0 active:translate-y-0 active:shadow-none"
           >
             Reset floor
           </button>
@@ -180,7 +180,7 @@ export function Demo() {
             </h2>
             <button
               onClick={startGuided}
-              className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-slate-500 hover:text-slate-100"
+              className="rounded-md border-2 border-slate-700 px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-slate-300 shadow-[3px_3px_0_0_rgba(100,116,139,0.3)] transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:border-slate-500 hover:text-slate-100 active:translate-x-0 active:translate-y-0 active:shadow-none"
             >
               Restart script
             </button>
@@ -238,7 +238,7 @@ export function Demo() {
               <button
                 onClick={advance}
                 disabled={running || atEnd}
-                className="mt-4 rounded-xl bg-sky-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+                className="mt-4 rounded-md border-2 border-sky-900 bg-sky-600 px-6 py-3 text-sm font-bold uppercase tracking-wide text-white shadow-[4px_4px_0_0_rgba(14,165,233,0.5)] transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:bg-sky-500 active:translate-x-0 active:translate-y-0 active:shadow-none disabled:cursor-not-allowed disabled:border-slate-700 disabled:bg-slate-700 disabled:text-slate-400 disabled:shadow-none"
               >
                 {atEnd ? 'Done — restart to run again' : running ? 'Running…' : statuses[current] === 'error' ? 'Retry' : 'Next'}
               </button>
@@ -259,7 +259,7 @@ export function Demo() {
                 key={sample.label}
                 disabled={!ready}
                 onClick={() => fire(sample.event)}
-                className={`rounded-lg border px-4 py-3 text-left text-sm text-slate-200 transition disabled:cursor-not-allowed disabled:opacity-40 ${TONE_CLASS[sample.tone]}`}
+                className={`rounded-md border-2 px-4 py-3 text-left text-sm font-semibold text-slate-200 transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 active:translate-x-0 active:translate-y-0 active:shadow-none disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none ${TONE_CLASS[sample.tone]}`}
               >
                 {sample.label}
               </button>
