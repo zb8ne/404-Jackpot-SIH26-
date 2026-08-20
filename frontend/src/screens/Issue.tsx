@@ -111,7 +111,7 @@ function generateDocId() {
         <form onSubmit={submit} className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/50">
           <div className="border-b border-slate-800 bg-slate-900/50 px-6 py-5">
             <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-sky-500/30 bg-sky-500/10 text-xl font-black text-sky-300">BC</div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-md border-2 border-sky-500/40 bg-sky-500/10 text-xl font-black text-sky-300 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.15)]">BC</div>
               <div className="min-w-0"><p className="font-bold text-slate-100">{selected?.name ?? 'Loading department…'}</p><p className="text-sm text-slate-500">Authorized for {selected ? docTypeLabel(selected.docTypeName).toLowerCase() : 'credential issuance'}</p></div>
               <span className="ml-auto rounded-full border border-slate-700 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Locked authority</span>
             </div>
@@ -121,7 +121,7 @@ function generateDocId() {
             <div className="grid gap-6 md:grid-cols-2">
               <div>
                 <StepLabel number="01" title="Credential holder" />
-                <select value={citizenAccountId} onChange={(e) => setCitizenAccountId(e.target.value)} required className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3.5 text-slate-100 outline-none transition focus:border-sky-500">
+                <select value={citizenAccountId} onChange={(e) => setCitizenAccountId(e.target.value)} required className="mt-3 w-full rounded-md border-2 border-slate-700 bg-slate-900 px-4 py-3.5 text-slate-100 outline-none transition-all duration-100 focus:border-sky-500 focus:shadow-[3px_3px_0_0_rgba(14,165,233,0.35)]">
                   <option value="">Select a provisioned citizen</option>
                   {citizens.map((account) => <option key={account.id} value={account.id}>{account.displayName} · {account.email}</option>)}
                 </select>
@@ -132,7 +132,7 @@ function generateDocId() {
                 <StepLabel number="02" title="Document identity" />
                 <div className="mt-3 flex gap-2">
                   <Input value={docId} onChange={setDocId} placeholder="BC-2026-000001" required mono />
-                  <button type="button" onClick={generateDocId} className="shrink-0 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 text-sm font-bold text-sky-300 transition hover:bg-sky-500/20">Generate</button>
+                  <button type="button" onClick={generateDocId} className="shrink-0 rounded-md border-2 border-sky-500/40 bg-sky-500/10 px-4 text-sm font-bold uppercase tracking-wide text-sky-300 shadow-[3px_3px_0_0_rgba(14,165,233,0.35)] transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:bg-sky-500/20 active:translate-x-0 active:translate-y-0 active:shadow-none">Generate</button>
                 </div>
                 <p className="mt-2 text-xs text-slate-600">Unique and permanent once anchored.</p>
               </div>
@@ -145,10 +145,10 @@ function generateDocId() {
                 onDragLeave={() => setDragActive(false)}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => { event.preventDefault(); setDragActive(false); setFile(event.dataTransfer.files?.[0] ?? null) }}
-                className={`mt-3 flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed px-6 py-10 text-center transition ${dragActive ? 'border-sky-400 bg-sky-500/10' : file ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-slate-700 bg-slate-900/40 hover:border-sky-500/50 hover:bg-slate-900'}`}
+                className={`mt-3 flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-6 py-10 text-center transition-all duration-100 ${dragActive ? 'border-sky-400 bg-sky-500/10' : file ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-slate-700 bg-slate-900/40 hover:border-sky-500/50 hover:bg-slate-900'}`}
               >
                 <input type="file" accept="application/pdf" required onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="sr-only" />
-                <span className={`flex h-12 w-12 items-center justify-center rounded-2xl text-2xl ${file ? 'bg-emerald-500/15 text-emerald-300' : 'bg-slate-800 text-slate-400'}`}>{file ? '✓' : '↑'}</span>
+                <span className={`flex h-12 w-12 items-center justify-center rounded-md border-2 text-2xl shadow-[inset_0_1px_0_0_rgba(255,255,255,0.15)] ${file ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300' : 'border-slate-700 bg-slate-800 text-slate-400'}`}>{file ? '✓' : '↑'}</span>
                 <p className="mt-3 font-semibold text-slate-200">{file ? file.name : 'Drop the original PDF here'}</p>
                 <p className="mt-1 text-xs text-slate-500">{file ? `${(file.size / 1024).toFixed(1)} KB ready to stamp` : 'or click to browse · PDF only'}</p>
               </label>
@@ -186,7 +186,7 @@ function generateDocId() {
               <button
                 type="button"
                 onClick={() => void downloadDocument(result.downloadUrl, `${result.docId}-stamped.pdf`).catch((e) => setError(String(e)))}
-                className="mt-4 w-full rounded-lg bg-emerald-500/20 px-5 py-3 font-semibold text-emerald-100 transition hover:bg-emerald-500/30"
+                className="mt-4 w-full rounded-md border-2 border-emerald-500/40 bg-emerald-500/20 px-5 py-3 font-bold uppercase tracking-wide text-emerald-100 shadow-[3px_3px_0_0_rgba(16,185,129,0.35)] transition-all duration-100 hover:-translate-x-0.5 hover:-translate-y-0.5 hover:bg-emerald-500/30 active:translate-x-0 active:translate-y-0 active:shadow-none"
               >
                 Download stamped PDF
               </button>
@@ -199,14 +199,14 @@ function generateDocId() {
             )}
           </div>
         )}
-        {!error && !result && <div className="rounded-2xl border border-slate-800 bg-slate-900/30 p-6"><p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Issuance protocol</p><ol className="mt-5 space-y-5">{['Registry marker and QR are added', 'Stamped bytes are hashed with SHA-256', 'Hash is anchored by the department signer', 'Exact stamped PDF is stored for download'].map((text, index) => <li key={text} className="flex gap-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-700 bg-slate-950 font-mono text-xs text-sky-300">{index + 1}</span><span className="pt-1 text-sm leading-5 text-slate-400">{text}</span></li>)}</ol></div>}
+        {!error && !result && <div className="rounded-2xl border border-slate-800 bg-slate-900/30 p-6"><p className="text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Issuance protocol</p><ol className="mt-5 space-y-5">{['Registry marker and QR are added', 'Stamped bytes are hashed with SHA-256', 'Hash is anchored by the department signer', 'Exact stamped PDF is stored for download'].map((text, index) => <li key={text} className="flex gap-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded border-2 border-sky-500/40 bg-sky-500/10 font-mono text-xs font-black text-sky-300 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.15)]">{index + 1}</span><span className="pt-1 text-sm leading-5 text-slate-400">{text}</span></li>)}</ol></div>}
         </div>
       </div>
     </div>
   )
 }
 
-const StepLabel = ({ number, title }: { number: string; title: string }) => <div className="flex items-center gap-2"><span className="font-mono text-xs font-bold text-sky-400">{number}</span><span className="text-xs font-bold uppercase tracking-widest text-slate-400">{title}</span></div>
+const StepLabel = ({ number, title }: { number: string; title: string }) => <div className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded border-2 border-sky-500/40 bg-sky-500/10 font-mono text-[10px] font-black text-sky-300">{number}</span><span className="text-xs font-bold uppercase tracking-widest text-slate-400">{title}</span></div>
 
 function Input({
   value,
@@ -227,7 +227,7 @@ function Input({
       required={required}
       placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
-      className={`w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition placeholder:text-slate-600 focus:border-sky-500 ${
+      className={`w-full rounded-md border-2 border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition-all duration-100 placeholder:text-slate-600 focus:border-sky-500 focus:shadow-[3px_3px_0_0_rgba(14,165,233,0.35)] ${
         mono ? 'font-mono' : ''
       }`}
     />

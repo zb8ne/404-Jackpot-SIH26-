@@ -154,7 +154,7 @@ function LoginForm({
           value={email}
           onChange={(event) => onEmail(event.target.value)}
           required
-          className="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none focus:border-sky-500"
+          className="w-full rounded-md border-2 border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none focus:border-sky-500"
         />
       </label>
 
@@ -166,7 +166,7 @@ function LoginForm({
           value={password}
           onChange={(event) => onPassword(event.target.value)}
           required
-          className="w-full rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none focus:border-sky-500"
+          className="w-full rounded-md border-2 border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none focus:border-sky-500"
         />
       </label>
 
