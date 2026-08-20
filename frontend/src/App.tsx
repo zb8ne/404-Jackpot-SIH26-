@@ -35,6 +35,7 @@ export default function App() {
   const [profile, setProfile] = useState<ApplicationUser | null>(null)
   const [profileError, setProfileError] = useState('')
   const [loginError, setLoginError] = useState('')
+  const [roleMismatchNotice, setRoleMismatchNotice] = useState('')
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -77,8 +78,14 @@ export default function App() {
         // The selected card controls only the sign-in presentation. The
         // backend-resolved account remains authoritative for the workspace and
         // permissions, so a stale or mistaken card must never sign a valid
-        // application account back out.
-        if (intent !== actualRole) sessionStorage.setItem(LOGIN_INTENT_KEY, actualRole)
+        // application account back out — but the user should still be told
+        // their card choice didn't match, instead of this happening silently.
+        if (intent !== actualRole) {
+          sessionStorage.setItem(LOGIN_INTENT_KEY, actualRole)
+          if (intent) setRoleMismatchNotice(`Signed in as ${actualRole.toLowerCase()}, not ${intent.toLowerCase()} as selected.`)
+        } else {
+          setRoleMismatchNotice('')
+        }
         setAccount(resolvedAccount)
         setProfile(resolvedAccount.governmentProfile)
         setTab(defaultTabFor(resolvedAccount))
@@ -132,6 +139,13 @@ export default function App() {
 
   return (
     <AppShell account={account} contract={contract} activeTab={tab} onTabChange={setTab} onSignOut={logout}>
+      {roleMismatchNotice && (
+        <div className="mb-4 flex items-center justify-between gap-4 rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          <span>{roleMismatchNotice}</span>
+          <button type="button" onClick={() => setRoleMismatchNotice('')} className="text-amber-300 hover:text-amber-100">Dismiss</button>
+        </div>
+      )}
+
       {profile && (
         <Suspense fallback={null}>
           <LiveFloor profile={profile} />
